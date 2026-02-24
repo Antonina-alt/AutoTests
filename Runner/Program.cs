@@ -21,6 +21,7 @@ public static class Program
             Console.WriteLine("Tip: Run from Rider without args is supported, but auto-detection failed.");
             return 2;
         }
+        
 
         testAssemblyPath = Path.GetFullPath(testAssemblyPath);
 
