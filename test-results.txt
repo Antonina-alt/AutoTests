@@ -1,0 +1,29 @@
+PASS  TodoServiceTests.ClearCompleted_RemovesDone_ReturnsRemovedCount()  6ms
+PASS  TodoServiceTests.GetById_ThrowsIfMissing()  1ms
+PASS  TodoServiceTests.GetById_ReturnsExisting()  0ms
+PASS  TodoServiceTests.Remove_ReturnsTrueWhenRemoved_FalseWhenMissing()  1ms
+PASS  TodoServiceTests.Add_TrimsTitle_AndDoneFalse()  0ms
+PASS  TodoServiceTests.Add_ThrowsOnNullOrWhitespace(null)  0ms
+PASS  TodoServiceTests.Add_ThrowsOnNullOrWhitespace()  0ms
+PASS  TodoServiceTests.Add_ThrowsOnNullOrWhitespace(   )  0ms
+PASS  TodoServiceTests.GetAll_ReturnsSnapshot()  16ms
+PASS  TodoServiceTests.UpdateTitle_UpdatesAndTrims()  1ms
+PASS  TodoServiceTests.UpdateTitle_ThrowsOnMissing()  0ms
+PASS  TodoServiceTests.UpdateTitle_ThrowsOnInvalidTitle(null)  0ms
+PASS  TodoServiceTests.UpdateTitle_ThrowsOnInvalidTitle()  0ms
+PASS  TodoServiceTests.UpdateTitle_ThrowsOnInvalidTitle(   )  0ms
+SKIP  TodoServiceTests.MarkDone_SetsDone_AndIsIdempotent  reason='Just test'
+PASS  TodoServiceTests.MarkDone_ThrowsIfMissing()  0ms
+SKIP  TodoServiceTests.ToggleDone_Toggles  reason='Just test'
+PASS  TodoServiceTests.Search_FindsExpected(hello, he, 1)  1ms
+PASS  TodoServiceTests.Search_FindsExpected(hello, x, 0)  0ms
+PASS  TodoServiceTests.Search_FindsExpected(Hello, he, 1)  0ms
+PASS  TodoServiceTests.Search_FindsExpected(hello world, WORLD, 1)  0ms
+FAIL  TodoServiceTests.Search_FindsExpected(hello world, q, 5)  Expected: 5, Actual: 0
+FAIL  TodoServiceTests.Search_FindsExpected(hello, hell, 0)  Expected: 0, Actual: 1
+FAIL  TodoServiceTests.Search_FindsExpected(hello, hell, 10)  Expected: 10, Actual: 1
+PASS  TodoServiceTests.Search_EmptyQuery_ReturnsAll()  0ms
+PASS  TodoServiceTests.CountDoneAsync_Works()  64ms
+PASS  TodoServiceTests.SharedContext_WasUsed()  0ms
+------------------------------------------------------------
+TOTAL: 27, PASS: 22, FAIL: 3, SKIP: 2
