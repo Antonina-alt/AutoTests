@@ -26,16 +26,17 @@ public sealed class TodoServiceTests
     public void SetUp()
     {
         _svc = new TodoService();
-        _shared.Logs.Add("SetUp per test");
+        _shared.AddLog("SetUp per test");
     }
 
     [TearDown]
     public void TearDown()
     {
-        _shared.Logs.Add("TearDown per test");
+        _shared.AddLog("TearDown per test");
     }
 
     [Test]
+    [Timeout(50)]
     public void Add_TrimsTitle_AndDoneFalse()
     {
         var item = _svc.Add("  hello  ");
@@ -45,6 +46,7 @@ public sealed class TodoServiceTests
     }
 
     [Test]
+    [Timeout(50)]
     [TestCase(null)]
     [TestCase("")]
     [TestCase("   ")]
@@ -55,6 +57,7 @@ public sealed class TodoServiceTests
     }
     
     [Test]
+    [Timeout(50)]
     [Priority(1)]
     public void Remove_ReturnsTrueWhenRemoved_FalseWhenMissing()
     {
@@ -65,6 +68,7 @@ public sealed class TodoServiceTests
     }
     
     [Test]
+    [Timeout(50)]
     [Priority(2)]
     public void GetById_ReturnsExisting()
     {
@@ -75,6 +79,7 @@ public sealed class TodoServiceTests
     }
 
     [Test]
+    [Timeout(50)]
     [Priority(3)]
     public void GetById_ThrowsIfMissing()
     {
@@ -82,6 +87,7 @@ public sealed class TodoServiceTests
     }
     
     [Test]
+    [Timeout(50)]
     public void GetAll_ReturnsSnapshot()
     {
         _svc.Add("a");
@@ -93,6 +99,7 @@ public sealed class TodoServiceTests
     }
     
     [Test]
+    [Timeout(50)]
     public void UpdateTitle_UpdatesAndTrims()
     {
         var item = _svc.Add("a");
@@ -102,12 +109,14 @@ public sealed class TodoServiceTests
     }
 
     [Test]
+    [Timeout(50)]
     public void UpdateTitle_ThrowsOnMissing()
     {
         Assert.Throws<InvalidOperationException>(() => _svc.UpdateTitle(Guid.NewGuid(), "x"));
     }
 
     [Test]
+    [Timeout(50)]
     [TestCase(null)]
     [TestCase("")]
     [TestCase("   ")]
@@ -131,6 +140,7 @@ public sealed class TodoServiceTests
     }
 
     [Test]
+    [Timeout(50)]
     public void MarkDone_ThrowsIfMissing()
     {
         Assert.Throws<InvalidOperationException>(() => _svc.MarkDone(Guid.NewGuid()));
@@ -150,6 +160,7 @@ public sealed class TodoServiceTests
     }
     
     [Test]
+    [Timeout(50)]
     [TestCase("hello", "he", 1)]
     [TestCase("hello", "x", 0)]
     [TestCase("Hello", "he", 1)] 
@@ -166,6 +177,7 @@ public sealed class TodoServiceTests
     }
 
     [Test]
+    [Timeout(50)]
     public void Search_EmptyQuery_ReturnsAll()
     {
         _svc.Add("a");
@@ -176,6 +188,7 @@ public sealed class TodoServiceTests
     }
     
     [Test]
+    [Timeout(50)]
     [Priority(10)]
     public void ClearCompleted_RemovesDone_ReturnsRemovedCount()
     {
@@ -195,6 +208,7 @@ public sealed class TodoServiceTests
     }
     
     [Test]
+    [Timeout(50)]
     public async Task CountDoneAsync_Works()
     {
         var a = _svc.Add("a");
@@ -208,9 +222,24 @@ public sealed class TodoServiceTests
     }
     
     [Test]
+    [Timeout(50)]
     public void SharedContext_WasUsed()
     {
         Assert.Contains(_shared.Logs, "SharedContext: SetUp");
         Assert.DoesNotContain(_shared.Logs, "some missing log");
+    }
+    
+    [Test]
+    [Timeout(200)]
+    public async Task SlowTest()
+    {
+        await Task.Delay(250);
+    }
+    
+    [Test]
+    [Timeout(200)]
+    public async Task FastTest()
+    {
+        await Task.Delay(100);
     }
 }

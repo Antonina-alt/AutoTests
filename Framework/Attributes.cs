@@ -48,3 +48,17 @@ public sealed class UseSharedContextAttribute : Attribute
     public Type ContextType { get; }
     public UseSharedContextAttribute(Type contextType) => ContextType = contextType;
 }
+
+[AttributeUsage(AttributeTargets.Method, Inherited = false)]
+public sealed class TimeoutAttribute : Attribute
+{
+    public int Milliseconds { get; }
+
+    public TimeoutAttribute(int milliseconds)
+    {
+        if (milliseconds <= 0)
+            throw new ArgumentOutOfRangeException(nameof(milliseconds), "Timeout must be greater than 0.");
+
+        Milliseconds = milliseconds;
+    }
+}
