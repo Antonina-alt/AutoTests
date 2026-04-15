@@ -32,3 +32,4 @@ E:\University\Labs\6sem\MPP\AutoTests\Tests\obj\Debug\net9.0\Tests.pdb
 E:\University\Labs\6sem\MPP\AutoTests\Tests\obj\Debug\net9.0\ref\Tests.dll
 E:\University\Labs\6sem\MPP\AutoTests\Tests\bin\Debug\net9.0\ProjectForTest.dll
 E:\University\Labs\6sem\MPP\AutoTests\Tests\bin\Debug\net9.0\ProjectForTest.pdb
+E:\University\Labs\6sem\MPP\AutoTests\Tests\obj\Debug\net9.0\Tests.sourcelink.json

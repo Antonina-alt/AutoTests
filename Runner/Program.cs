@@ -1,13 +1,9 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.IO;
-using System.Linq;
 using System.Reflection;
-using System.Threading;
-using System.Threading.Tasks;
+using System.Runtime.ExceptionServices;
 using Framework;
+using DynamicThreadPool;
 
 namespace Runner;
 
@@ -26,18 +22,52 @@ public static class Program
     private sealed record ClassRuntime(Type ClassType, ISharedContext? SharedContext);
 
     private sealed record RunReport(
-        string Mode,
-        int MaxDegreeOfParallelism,
+        int MinThreads,
+        int MaxThreads,
         int Passed,
         int Failed,
         int Skipped,
         long ElapsedMilliseconds,
         IReadOnlyCollection<string> Results);
+
+    private sealed record SimulationRunInfo(
+        int RunNumber,
+        string BlockName,
+        int MinThreads,
+        int MaxThreads,
+        int Passed,
+        int Failed,
+        int Skipped,
+        long ElapsedMilliseconds,
+        string ReportFilePath);
+
+    private sealed record SimulationSummary(
+        int TotalRuns,
+        int SuccessfulRuns,
+        int FailedRuns,
+        double AverageTimeMs,
+        long MinTimeMs,
+        long MaxTimeMs);
+
+    private sealed class RunExecutionState
+    {
+        public ConcurrentQueue<string> Results { get; } = new();
+
+        public int Passed;
+        public int Failed;
+        public int Skipped;
+    }
     
-    private sealed record ComparisonReport(
-        double Speedup,
-        long TimeSaved,
-        double PercentSaved);
+    private sealed record BlockSummary(
+        string BlockName,
+        int MinThreads,
+        int MaxThreads,
+        int RunsCount,
+        double AverageTimeMs,
+        long MinTimeMs,
+        long MaxTimeMs,
+        double DeltaVsBaselineMs,
+        double DeltaVsBaselinePercent);
 
     public static async Task<int> Main(string[] args)
     {
@@ -45,8 +75,8 @@ public static class Program
 
         if (string.IsNullOrWhiteSpace(testAssemblyPath))
         {
-            Console.WriteLine("Usage: Runner <path-to-tests-assembly.dll> [--mdop=4]");
-            Console.WriteLine("Tip: Run from Rider without args is supported, but auto-detection failed.");
+            Console.WriteLine("Usage:");
+            Console.WriteLine("Runner <path-to-tests-assembly.dll>");
             return 2;
         }
 
@@ -58,80 +88,196 @@ public static class Program
             return 2;
         }
 
-        var userMdop = GetMaxDegreeOfParallelism(args);
-
-        Console.WriteLine();
-        Console.WriteLine("============================================================");
-        Console.WriteLine("The same tests will be run twice:");
-        Console.WriteLine("1) sequentially, with MaxDegreeOfParallelism = 1");
-        Console.WriteLine($"2) with user value, MaxDegreeOfParallelism = {userMdop}");
-        Console.WriteLine("============================================================");
-        Console.WriteLine();
-
         var asm = Assembly.LoadFrom(testAssemblyPath);
 
-        var sequentialReport = await RunSuiteAsync(asm, 1, "SEQUENTIAL");
-        RunReport? parallelReport = null;
-
-        if (userMdop != 1)
-        {
-            parallelReport = await RunSuiteAsync(asm, userMdop, "PARALLEL");
-        }
-
-        Console.WriteLine();
-        Console.WriteLine("============================================================");
-        Console.WriteLine("FINAL COMPARISON");
-        Console.WriteLine("============================================================");
-
-        PrintShortReport(sequentialReport);
-
-        if (parallelReport != null)
-        {
-            PrintShortReport(parallelReport);
-
-            var comparison = BuildComparison(sequentialReport, parallelReport);
-
-            Console.WriteLine();
-            Console.WriteLine($"Speedup: {comparison.Speedup:F2}x");
-            Console.WriteLine($"Time saved: {comparison.TimeSaved}ms ({comparison.PercentSaved:F1}%)");
-        }
-        else
-        {
-            Console.WriteLine();
-            Console.WriteLine("User MaxDegreeOfParallelism = 1, so comparison is not applicable.");
-        }
-
-        SaveCombinedReport(sequentialReport, parallelReport);
-
-        if (sequentialReport.Failed > 0)
-            return 1;
-
-        if (parallelReport is not null && parallelReport.Failed > 0)
-            return 1;
-
-        return 0;
+        return await RunLoadSimulationAsync(asm);
     }
 
-    private static async Task<RunReport> RunSuiteAsync(Assembly asm, int maxDegreeOfParallelism, string mode)
+    private static async Task<int> RunLoadSimulationAsync(Assembly asm)
     {
         Console.WriteLine();
-        Console.WriteLine("------------------------------------------------------------");
-        Console.WriteLine($"RUN MODE: {mode}");
-        Console.WriteLine($"MaxDegreeOfParallelism = {maxDegreeOfParallelism}");
-        Console.WriteLine("------------------------------------------------------------");
+        Console.WriteLine("============================================================");
+        Console.WriteLine("LOAD SIMULATION AND TEST EXECUTION");
+        Console.WriteLine("Uneven load: single runs, bursts, pauses");
+        Console.WriteLine("Total planned runs: 50");
+        Console.WriteLine("============================================================");
+        Console.WriteLine();
 
+        var runs = new List<SimulationRunInfo>();
+        var runNumber = 0;
+
+        async Task RunBlockAsync(
+            string blockName,
+            int count,
+            int minThreads,
+            int maxThreads,
+            TimeSpan delayBetweenRuns)
+        {
+            Console.WriteLine();
+            Console.WriteLine("------------------------------------------------------------");
+            Console.WriteLine($"BLOCK: {blockName}");
+            Console.WriteLine($"Runs: {count}");
+            Console.WriteLine($"MinThreads: {minThreads}, MaxThreads: {maxThreads}");
+            Console.WriteLine($"Delay between runs: {delayBetweenRuns.TotalMilliseconds} ms");
+            Console.WriteLine("------------------------------------------------------------");
+
+            for (int i = 0; i < count; i++)
+            {
+                runNumber++;
+
+                Console.WriteLine();
+                Console.WriteLine($"[SIM] Starting run #{runNumber:00} ({blockName})");
+
+                var report = await RunSuiteWithDynamicPoolAsync(asm, minThreads, maxThreads);
+                var reportPath = SaveRunReport(report, runNumber, blockName);
+
+                var runInfo = new SimulationRunInfo(
+                    RunNumber: runNumber,
+                    BlockName: blockName,
+                    MinThreads: minThreads,
+                    MaxThreads: maxThreads,
+                    Passed: report.Passed,
+                    Failed: report.Failed,
+                    Skipped: report.Skipped,
+                    ElapsedMilliseconds: report.ElapsedMilliseconds,
+                    ReportFilePath: reportPath);
+
+                runs.Add(runInfo);
+
+                Console.WriteLine(
+                    $"[SIM] Run #{runInfo.RunNumber:00} finished | " +
+                    $"PASS={runInfo.Passed}, FAIL={runInfo.Failed}, SKIP={runInfo.Skipped}, " +
+                    $"TIME={runInfo.ElapsedMilliseconds}ms");
+
+                if (delayBetweenRuns > TimeSpan.Zero)
+                    await Task.Delay(delayBetweenRuns);
+            }
+        }
+
+        async Task PauseAsync(string title, TimeSpan duration)
+        {
+            Console.WriteLine();
+            Console.WriteLine($"*** {title}: {duration.TotalSeconds:0.#} sec ***");
+            await Task.Delay(duration);
+        }
+        
+        await RunBlockAsync(
+            blockName: "Baseline",
+            count: 5,
+            minThreads: 1,
+            maxThreads: 1,
+            delayBetweenRuns: TimeSpan.FromMilliseconds(300));
+
+        await PauseAsync("Idle interval", TimeSpan.FromMilliseconds(500));
+
+        await RunBlockAsync(
+            blockName: "PeakBurst",
+            count: 20,
+            minThreads: 2,
+            maxThreads: 6,
+            delayBetweenRuns: TimeSpan.FromMilliseconds(100));
+
+        await PauseAsync("Idle interval", TimeSpan.FromMilliseconds(400));
+
+        await RunBlockAsync(
+            blockName: "SparseRuns",
+            count: 5,
+            minThreads: 1,
+            maxThreads: 3,
+            delayBetweenRuns: TimeSpan.FromMilliseconds(400));
+
+        await PauseAsync("Idle interval", TimeSpan.FromMilliseconds(500));
+
+        await RunBlockAsync(
+            blockName: "ModerateLoad",
+            count: 10,
+            minThreads: 2,
+            maxThreads: 4,
+            delayBetweenRuns: TimeSpan.FromMilliseconds(150));
+
+        await PauseAsync("Idle interval", TimeSpan.FromMilliseconds(400));
+
+        await RunBlockAsync(
+            blockName: "FinalBurst",
+            count: 10,
+            minThreads: 2,
+            maxThreads: 6,
+            delayBetweenRuns: TimeSpan.FromMilliseconds(80));
+
+        var summary = BuildSimulationSummary(runs);
+        var blockSummaries = BuildBlockSummaries(runs);
+
+        PrintSimulationSummary(runs, summary);
+        PrintBlockComparisonTable(blockSummaries);
+        SaveSimulationSummary(runs, summary);
+
+        return runs.Any(r => r.Failed > 0) ? 1 : 0;
+    }
+
+    private static SimulationSummary BuildSimulationSummary(IReadOnlyCollection<SimulationRunInfo> runs)
+    {
+        if (runs.Count == 0)
+        {
+            return new SimulationSummary(
+                TotalRuns: 0,
+                SuccessfulRuns: 0,
+                FailedRuns: 0,
+                AverageTimeMs: 0,
+                MinTimeMs: 0,
+                MaxTimeMs: 0);
+        }
+
+        var successfulRuns = runs.Count(r => r.Failed == 0);
+        var failedRuns = runs.Count(r => r.Failed > 0);
+
+        return new SimulationSummary(
+            TotalRuns: runs.Count,
+            SuccessfulRuns: successfulRuns,
+            FailedRuns: failedRuns,
+            AverageTimeMs: runs.Average(r => r.ElapsedMilliseconds),
+            MinTimeMs: runs.Min(r => r.ElapsedMilliseconds),
+            MaxTimeMs: runs.Max(r => r.ElapsedMilliseconds));
+    }
+
+    private static void PrintSimulationSummary(
+        IReadOnlyCollection<SimulationRunInfo> runs,
+        SimulationSummary summary)
+    {
+        Console.WriteLine();
+        Console.WriteLine("============================================================");
+        Console.WriteLine("LOAD SIMULATION SUMMARY");
+        Console.WriteLine("============================================================");
+        Console.WriteLine($"Total runs: {summary.TotalRuns}");
+        Console.WriteLine($"Successful runs: {summary.SuccessfulRuns}");
+        Console.WriteLine($"Failed runs: {summary.FailedRuns}");
+        Console.WriteLine($"Average time: {summary.AverageTimeMs:F2} ms");
+        Console.WriteLine($"Min time: {summary.MinTimeMs} ms");
+        Console.WriteLine($"Max time: {summary.MaxTimeMs} ms");
+        Console.WriteLine();
+
+        foreach (var run in runs)
+        {
+            Console.WriteLine(
+                $"Run #{run.RunNumber:00} | Block={run.BlockName} | " +
+                $"Min={run.MinThreads}, Max={run.MaxThreads} | " +
+                $"PASS={run.Passed}, FAIL={run.Failed}, SKIP={run.Skipped} | " +
+                $"TIME={run.ElapsedMilliseconds}ms");
+        }
+    }
+
+    private static async Task<RunReport> RunSuiteWithDynamicPoolAsync(
+        Assembly asm,
+        int minThreads,
+        int maxThreads)
+    {
         var totalStopwatch = Stopwatch.StartNew();
-
-        var results = new ConcurrentQueue<string>();
         var consoleLock = new object();
-        var passed = 0;
-        var failed = 0;
-        var skipped = 0;
+        var state = new RunExecutionState();
 
         void SafeWriteLine(string message)
         {
             lock (consoleLock)
-            {     
+            {
                 Console.WriteLine(message);
             }
         }
@@ -150,10 +296,12 @@ public static class Program
                 if (useShared != null)
                 {
                     if (!typeof(ISharedContext).IsAssignableFrom(useShared.ContextType))
-                        throw new TestDiscoveryException($"{useShared.ContextType.Name} must implement ISharedContext.");
+                        throw new TestDiscoveryException(
+                            $"{useShared.ContextType.Name} must implement ISharedContext.");
 
                     shared = (ISharedContext)Activator.CreateInstance(useShared.ContextType)!
-                             ?? throw new TestDiscoveryException($"Cannot create shared context {useShared.ContextType.Name}");
+                             ?? throw new TestDiscoveryException(
+                                 $"Cannot create shared context {useShared.ContextType.Name}");
 
                     SafeWriteLine($"[CTX] {testClass.Name}: shared context created: {useShared.ContextType.Name}");
                     await shared.SetUpAsync();
@@ -186,8 +334,8 @@ public static class Program
                 {
                     if (tm.Ignore != null)
                     {
-                        Interlocked.Increment(ref skipped);
-                        results.Enqueue($"SKIP  {testClass.Name}.{tm.Method.Name}  reason='{tm.Ignore.Reason}'");
+                        Interlocked.Increment(ref state.Skipped);
+                        state.Results.Enqueue($"SKIP  {testClass.Name}.{tm.Method.Name}  reason='{tm.Ignore.Reason}'");
                         continue;
                     }
 
@@ -231,25 +379,23 @@ public static class Program
                 }
             }
 
-            var semaphore = new SemaphoreSlim(maxDegreeOfParallelism);
+            using var pool = new DynamicThreadPool.DynamicThreadPool(new ThreadPoolOptions
+            {
+                MinThreads = minThreads,
+                MaxThreads = maxThreads,
+                IdleTimeout = TimeSpan.FromSeconds(2),
+                QueueWaitThreshold = TimeSpan.FromMilliseconds(300),
+                MonitorPeriod = TimeSpan.FromSeconds(1),
+                EnableLogging = true
+            });
 
-            var tasks = discoveredTests
-                .OrderByDescending(t => t.Priority)
-                .Select(async test =>
-                {
-                    await semaphore.WaitAsync();
-                    try
-                    {
-                        await RunSingleAsync(test);
-                    }
-                    finally
-                    {
-                        semaphore.Release();
-                    }
-                })
-                .ToArray();
+            await EnqueueTestsWithUnevenLoadAsync(
+                discoveredTests,
+                pool,
+                state,
+                SafeWriteLine);
 
-            await Task.WhenAll(tasks);
+            pool.WaitAll();
         }
         finally
         {
@@ -266,135 +412,354 @@ public static class Program
 
         totalStopwatch.Stop();
 
-        foreach (var line in results)
+        foreach (var line in state.Results)
             Console.WriteLine(line);
 
         Console.WriteLine(new string('-', 60));
-        Console.WriteLine($"MODE: {mode}");
-        Console.WriteLine($"TOTAL: {passed + failed + skipped}, PASS: {passed}, FAIL: {failed}, SKIP: {skipped}");
+        Console.WriteLine(
+            $"TOTAL: {state.Passed + state.Failed + state.Skipped}, PASS: {state.Passed}, FAIL: {state.Failed}, SKIP: {state.Skipped}");
         Console.WriteLine($"TOTAL ELAPSED: {totalStopwatch.ElapsedMilliseconds}ms");
 
         return new RunReport(
-            mode,
-            maxDegreeOfParallelism,
-            passed,
-            failed,
-            skipped,
+            minThreads,
+            maxThreads,
+            state.Passed,
+            state.Failed,
+            state.Skipped,
             totalStopwatch.ElapsedMilliseconds,
-            results.ToArray());
+            state.Results.ToArray());
+    }
 
-        async Task RunSingleAsync(DiscoveredTest test)
+    private static async Task EnqueueTestsWithUnevenLoadAsync(
+        IReadOnlyList<DiscoveredTest> tests,
+        DynamicThreadPool.DynamicThreadPool threadPool,
+        RunExecutionState state,
+        Action<string> safeWriteLine)
+    {
+        if (tests.Count == 0)
+            return;
+
+        var ordered = tests
+            .OrderByDescending(t => t.Priority)
+            .ToList();
+
+        var total = ordered.Count;
+        var singleCount = Math.Max(1, total / 5);
+        var burstCount = Math.Max(1, total / 3);
+        var moderateCount = Math.Max(1, total / 4);
+
+        var index = 0;
+
+        async Task EnqueueOneByOneAsync(int count, TimeSpan delay, string stage)
         {
-            var instance = CreateTestInstance(test.ClassType, test.SharedContext);
-            var sw = Stopwatch.StartNew();
-            var displayName = $"{test.ClassType.Name}.{test.Method.Name}({FormatArgs(test.Args)})";
+            for (var i = 0; i < count && index < total; i++, index++)
+            {
+                var test = ordered[index];
+                threadPool.Enqueue(
+                    () => RunSingleSync(test, state),
+                    $"{test.ClassType.Name}.{test.Method.Name}");
 
+                safeWriteLine($"[LOAD] {stage}: single enqueue -> {test.ClassType.Name}.{test.Method.Name}");
+                await Task.Delay(delay);
+            }
+        }
+
+        async Task EnqueueBurstAsync(int count, string stage)
+        {
+            for (var i = 0; i < count && index < total; i++, index++)
+            {
+                var test = ordered[index];
+                threadPool.Enqueue(
+                    () => RunSingleSync(test, state),
+                    $"{test.ClassType.Name}.{test.Method.Name}");
+
+                safeWriteLine($"[LOAD] {stage}: burst enqueue -> {test.ClassType.Name}.{test.Method.Name}");
+            }
+
+            await Task.Yield();
+        }
+
+        async Task EnqueueModerateAsync(int count, TimeSpan delay, string stage)
+        {
+            for (var i = 0; i < count && index < total; i++, index++)
+            {
+                var test = ordered[index];
+                threadPool.Enqueue(
+                    () => RunSingleSync(test, state),
+                    $"{test.ClassType.Name}.{test.Method.Name}");
+
+                safeWriteLine($"[LOAD] {stage}: moderate enqueue -> {test.ClassType.Name}.{test.Method.Name}");
+                await Task.Delay(delay);
+            }
+        }
+
+        await EnqueueOneByOneAsync(singleCount, TimeSpan.FromMilliseconds(150), "Stage 1");
+        safeWriteLine("[LOAD] Idle interval after Stage 1");
+        await Task.Delay(TimeSpan.FromMilliseconds(250));
+
+        await EnqueueBurstAsync(burstCount, "Stage 2");
+        safeWriteLine("[LOAD] Idle interval after Stage 2");
+        await Task.Delay(TimeSpan.FromMilliseconds(150));
+
+        await EnqueueModerateAsync(moderateCount, TimeSpan.FromMilliseconds(80), "Stage 3");
+        safeWriteLine("[LOAD] Idle interval after Stage 3");
+        await Task.Delay(TimeSpan.FromMilliseconds(250));
+
+        while (index < total)
+        {
+            var test = ordered[index++];
+            threadPool.Enqueue(
+                () => RunSingleSync(test, state),
+                $"{test.ClassType.Name}.{test.Method.Name}");
+
+            safeWriteLine($"[LOAD] Stage 4: tail enqueue -> {test.ClassType.Name}.{test.Method.Name}");
+            await Task.Delay(TimeSpan.FromMilliseconds(40));
+        }
+    }
+
+    private static void RunSingleSync(
+        DiscoveredTest test,
+        RunExecutionState state)
+    {
+        var instance = CreateTestInstance(test.ClassType, test.SharedContext);
+        var sw = Stopwatch.StartNew();
+        var displayName = $"{test.ClassType.Name}.{test.Method.Name}({FormatArgs(test.Args)})";
+
+        try
+        {
+            if (test.TimeoutMilliseconds is int timeoutMs)
+            {
+                ExecuteWithTimeout(instance, test, timeoutMs);
+            }
+            else
+            {
+                ExecuteTestBodyAsync(instance, test).GetAwaiter().GetResult();
+            }
+
+            Interlocked.Increment(ref state.Passed);
+            state.Results.Enqueue($"PASS  {displayName}  {sw.ElapsedMilliseconds}ms");
+        }
+        catch (TimeoutException)
+        {
+            Interlocked.Increment(ref state.Failed);
+            state.Results.Enqueue($"FAIL  {displayName}  TIMEOUT after {test.TimeoutMilliseconds}ms");
+        }
+        catch (TargetInvocationException tie) when (tie.InnerException is AssertionFailedException aex)
+        {
+            Interlocked.Increment(ref state.Failed);
+            state.Results.Enqueue($"FAIL  {displayName}  {aex.Message}");
+        }
+        catch (TargetInvocationException tie) when (tie.InnerException is TestSkippedException skipex)
+        {
+            Interlocked.Increment(ref state.Skipped);
+            state.Results.Enqueue($"SKIP  {displayName}  {skipex.Message}");
+        }
+        catch (TargetInvocationException tie)
+        {
+            Interlocked.Increment(ref state.Failed);
+            var inner = tie.InnerException;
+            state.Results.Enqueue($"FAIL  {displayName}  EX: {inner?.GetType().Name} {inner?.Message}");
+            if (!string.IsNullOrWhiteSpace(inner?.StackTrace))
+                state.Results.Enqueue($"      STACK: {TrimStack(inner.StackTrace)}");
+        }
+        catch (Exception ex)
+        {
+            Interlocked.Increment(ref state.Failed);
+            state.Results.Enqueue($"FAIL  {displayName}  EX: {ex.GetType().Name} {ex.Message}");
+            if (!string.IsNullOrWhiteSpace(ex.StackTrace))
+                state.Results.Enqueue($"      STACK: {TrimStack(ex.StackTrace)}");
+        }
+    }
+
+    private static void ExecuteWithTimeout(object instance, DiscoveredTest test, int timeoutMs)
+    {
+        Exception? capturedException = null;
+
+        var executionThread = new Thread(() =>
+        {
             try
             {
-                var executionTask = ExecuteTestBodyAsync(instance, test);
-
-                if (test.TimeoutMilliseconds is int timeoutMs)
-                {
-                    await executionTask.WaitAsync(TimeSpan.FromMilliseconds(timeoutMs));
-                }
-                else
-                {
-                    await executionTask;
-                }
-
-                Interlocked.Increment(ref passed);
-                results.Enqueue($"PASS  {displayName}  {sw.ElapsedMilliseconds}ms");
-            }
-            catch (TimeoutException)
-            {
-                Interlocked.Increment(ref failed);
-                results.Enqueue($"FAIL  {displayName}  TIMEOUT after {test.TimeoutMilliseconds}ms");
-            }
-            catch (TargetInvocationException tie) when (tie.InnerException is AssertionFailedException aex)
-            {
-                Interlocked.Increment(ref failed);
-                results.Enqueue($"FAIL  {displayName}  {aex.Message}");
-            }
-            catch (TargetInvocationException tie) when (tie.InnerException is TestSkippedException skipex)
-            {
-                Interlocked.Increment(ref skipped);
-                results.Enqueue($"SKIP  {displayName}  {skipex.Message}");
-            }
-            catch (TargetInvocationException tie)
-            {
-                Interlocked.Increment(ref failed);
-                var inner = tie.InnerException;
-                results.Enqueue($"FAIL  {displayName}  EX: {inner?.GetType().Name} {inner?.Message}");
-                if (!string.IsNullOrWhiteSpace(inner?.StackTrace))
-                    results.Enqueue($"      STACK: {TrimStack(inner.StackTrace)}");
+                ExecuteTestBodyAsync(instance, test).GetAwaiter().GetResult();
             }
             catch (Exception ex)
             {
-                Interlocked.Increment(ref failed);
-                results.Enqueue($"FAIL  {displayName}  EX: {ex.GetType().Name} {ex.Message}");
-                if (!string.IsNullOrWhiteSpace(ex.StackTrace))
-                    results.Enqueue($"      STACK: {TrimStack(ex.StackTrace)}");
+                capturedException = ex;
             }
-        }
-    }
-
-    private static void PrintShortReport(RunReport report)
-    {
-        Console.WriteLine();
-        Console.WriteLine(
-            $"{report.Mode}: MAX DEGREE OF PARALLELISM={report.MaxDegreeOfParallelism}, " +
-            $"PASS={report.Passed}, FAIL={report.Failed}, SKIP={report.Skipped}, " +
-            $"TIME={report.ElapsedMilliseconds}ms");
-    }
-
-    private static void SaveCombinedReport(RunReport sequential, RunReport? parallel)
-    {
-        var lines = new List<string>();
-
-        AppendRunReport(lines, "==================== SEQUENTIAL RUN ====================", sequential);
-
-        if (parallel != null)
+        })
         {
-            AppendRunReport(lines, "==================== USER RUN ====================", parallel);
+            IsBackground = true,
+            Name = $"TestExecution-{test.ClassType.Name}.{test.Method.Name}"
+        };
 
-            var comparison = BuildComparison(sequential, parallel);
-            AppendComparison(lines, comparison);
+        executionThread.Start();
+
+        var finished = executionThread.Join(timeoutMs);
+
+        if (!finished)
+            throw new TimeoutException($"Test exceeded timeout of {timeoutMs}ms.");
+
+        if (capturedException != null)
+            ExceptionDispatchInfo.Capture(capturedException).Throw();
+    }
+    
+    private static IReadOnlyList<BlockSummary> BuildBlockSummaries(
+        IReadOnlyCollection<SimulationRunInfo> runs)
+    {
+        var grouped = runs
+            .GroupBy(r => new { r.BlockName, r.MinThreads, r.MaxThreads })
+            .Select(g => new
+            {
+                g.Key.BlockName,
+                g.Key.MinThreads,
+                g.Key.MaxThreads,
+                RunsCount = g.Count(),
+                AverageTimeMs = g.Average(x => x.ElapsedMilliseconds),
+                MinTimeMs = g.Min(x => x.ElapsedMilliseconds),
+                MaxTimeMs = g.Max(x => x.ElapsedMilliseconds)
+            })
+            .OrderBy(x => x.BlockName)
+            .ToList();
+
+        var baseline = grouped.FirstOrDefault(x => x.MinThreads == 1 && x.MaxThreads == 1);
+        var baselineAverage = baseline?.AverageTimeMs ?? 0;
+
+        return grouped
+            .Select(x =>
+            {
+                var delta = baseline is null ? 0 : x.AverageTimeMs - baselineAverage;
+                var percent = baseline is null || baselineAverage == 0
+                    ? 0
+                    : delta / baselineAverage * 100.0;
+
+                return new BlockSummary(
+                    BlockName: x.BlockName,
+                    MinThreads: x.MinThreads,
+                    MaxThreads: x.MaxThreads,
+                    RunsCount: x.RunsCount,
+                    AverageTimeMs: x.AverageTimeMs,
+                    MinTimeMs: x.MinTimeMs,
+                    MaxTimeMs: x.MaxTimeMs,
+                    DeltaVsBaselineMs: delta,
+                    DeltaVsBaselinePercent: percent);
+            })
+            .ToList();
+    }
+    
+    private static void PrintBlockComparisonTable(IReadOnlyList<BlockSummary> summaries)
+    {
+        Console.WriteLine();
+        Console.WriteLine("============================================================");
+        Console.WriteLine("BLOCK COMPARISON TABLE");
+        Console.WriteLine("============================================================");
+        Console.WriteLine(
+            $"{"Block",-16} {"Min",4} {"Max",4} {"Runs",4} {"Avg(ms)",10} {"Min(ms)",10} {"Max(ms)",10} {"Delta(ms)",12} {"Delta(%)",10}");
+
+        foreach (var s in summaries)
+        {
+            Console.WriteLine(
+                $"{s.BlockName,-16} " +
+                $"{s.MinThreads,4} " +
+                $"{s.MaxThreads,4} " +
+                $"{s.RunsCount,4} " +
+                $"{s.AverageTimeMs,10:F2} " +
+                $"{s.MinTimeMs,10} " +
+                $"{s.MaxTimeMs,10} " +
+                $"{s.DeltaVsBaselineMs,12:F2} " +
+                $"{s.DeltaVsBaselinePercent,10:F2}");
+        }
+    }
+
+    private static void SaveSimulationSummary(
+        IReadOnlyCollection<SimulationRunInfo> runs,
+        SimulationSummary summary)
+    {
+        var lines = new List<string>
+        {
+            "LOAD SIMULATION SUMMARY",
+            $"DATE: {DateTime.Now:yyyy-MM-dd HH:mm:ss}",
+            $"TOTAL RUNS: {summary.TotalRuns}",
+            $"SUCCESSFUL RUNS: {summary.SuccessfulRuns}",
+            $"FAILED RUNS: {summary.FailedRuns}",
+            $"AVERAGE TIME: {summary.AverageTimeMs:F2} ms",
+            $"MIN TIME: {summary.MinTimeMs} ms",
+            $"MAX TIME: {summary.MaxTimeMs} ms",
+            "",
+            "DETAILS:"
+        };
+        
+        lines.Add("");
+        lines.Add("BLOCK COMPARISON TABLE:");
+
+        var blockSummaries = BuildBlockSummaries(runs);
+
+        lines.Add(
+            $"{"Block",-16} {"Min",4} {"Max",4} {"Runs",4} {"Avg(ms)",10} {"Min(ms)",10} {"Max(ms)",10} {"DeltaVsBaseline",16} {"DeltaPercent",14}");
+
+        foreach (var s in blockSummaries)
+        {
+            lines.Add(
+                $"{s.BlockName,-16} " +
+                $"{s.MinThreads,4} " +
+                $"{s.MaxThreads,4} " +
+                $"{s.RunsCount,4} " +
+                $"{s.AverageTimeMs,10:F2} " +
+                $"{s.MinTimeMs,10} " +
+                $"{s.MaxTimeMs,10} " +
+                $"{s.DeltaVsBaselineMs,16:F2} " +
+                $"{s.DeltaVsBaselinePercent,14:F2}");
         }
 
-        var outPath = Path.Combine(Environment.CurrentDirectory, "test-results.txt");
-        File.WriteAllLines(outPath, lines);
-        Console.WriteLine();
-        Console.WriteLine($"Results saved: {outPath}");
-    }
-    
-    private static ComparisonReport BuildComparison(RunReport sequential, RunReport parallel)
-    {
-        var speedup = sequential.ElapsedMilliseconds / (double)parallel.ElapsedMilliseconds;
-        var saved = sequential.ElapsedMilliseconds - parallel.ElapsedMilliseconds;
-        var percent = sequential.ElapsedMilliseconds == 0
-            ? 0
-            : saved * 100.0 / sequential.ElapsedMilliseconds;
+        foreach (var run in runs)
+        {
+            lines.Add(
+                $"Run #{run.RunNumber:00} | Block={run.BlockName} | " +
+                $"Min={run.MinThreads}, Max={run.MaxThreads} | " +
+                $"PASS={run.Passed}, FAIL={run.Failed}, SKIP={run.Skipped} | " +
+                $"TIME={run.ElapsedMilliseconds}ms | REPORT={run.ReportFilePath}");
+        }
 
-        return new ComparisonReport(speedup, saved, percent);
+        var filePath = Path.Combine(AppContext.BaseDirectory, "load-simulation-summary.txt");
+        File.WriteAllLines(filePath, lines);
+
+        Console.WriteLine();
+        Console.WriteLine($"Simulation summary saved to: {filePath}");
     }
     
-    private static void AppendRunReport(List<string> lines, string title, RunReport report)
+    private static string SaveRunReport(RunReport report, int? runNumber, string? blockName)
     {
-        lines.Add(title);
-        lines.Add($"Mode: {report.Mode}");
-        lines.Add($"MAX DEGREE OF PARALLELISM: {report.MaxDegreeOfParallelism}");
-        lines.Add($"TOTAL: {report.Passed + report.Failed + report.Skipped}, PASS: {report.Passed}, FAIL: {report.Failed}, SKIP: {report.Skipped}");
-        lines.Add($"TOTAL ELAPSED: {report.ElapsedMilliseconds}ms");
-        lines.Add("");
+        var lines = new List<string>
+        {
+            "RUN REPORT",
+            $"DATE: {DateTime.Now:yyyy-MM-dd HH:mm:ss}",
+            $"MIN THREADS: {report.MinThreads}",
+            $"MAX THREADS: {report.MaxThreads}",
+            $"PASS: {report.Passed}",
+            $"FAIL: {report.Failed}",
+            $"SKIP: {report.Skipped}",
+            $"ELAPSED: {report.ElapsedMilliseconds}ms",
+            ""
+        };
+
         lines.AddRange(report.Results);
-        lines.Add("");
-    }
-    
-    private static void AppendComparison(List<string> lines, ComparisonReport comparison)
-    {
-        lines.Add("==================== COMPARISON ====================");
-        lines.Add($"Speedup: {comparison.Speedup:F2}x");
-        lines.Add($"Time saved: {comparison.TimeSaved}ms ({comparison.PercentSaved:F1}%)");
+
+        string filePath;
+
+        if (runNumber.HasValue && !string.IsNullOrWhiteSpace(blockName))
+        {
+            var reportsDir = Path.Combine(AppContext.BaseDirectory, "simulation-reports");
+            Directory.CreateDirectory(reportsDir);
+
+            filePath = Path.Combine(
+                reportsDir,
+                $"run_{runNumber.Value:00}_{blockName}.txt");
+        }
+        else
+        {
+            filePath = Path.Combine(AppContext.BaseDirectory, "run-report.txt");
+        }
+
+        File.WriteAllLines(filePath, lines);
+        return filePath;
     }
 
     private static async Task InvokeMaybeAsync(object instance, MethodInfo method)
@@ -425,7 +790,8 @@ public static class Program
     private static void DumpSharedContextInfo(Type classType, ISharedContext ctx, Action<string> writeLine)
     {
         var ctxType = ctx.GetType();
-        var logsProp = ctxType.GetProperty("Logs", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        var logsProp =
+            ctxType.GetProperty("Logs", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
         if (logsProp == null) return;
 
         var val = logsProp.GetValue(ctx);
@@ -451,50 +817,7 @@ public static class Program
         var positional = args.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal));
         return positional ?? TryAutoDetectTestsDll();
     }
-
-    private static int GetMaxDegreeOfParallelism(string[] args)
-    {
-        var fromArgs = TryParseMaxDegreeOfParallelism(args);
-        if (fromArgs.HasValue)
-            return fromArgs.Value;
-
-        return ReadMaxDegreeOfParallelismFromConsole();
-    }
-
-    private static int? TryParseMaxDegreeOfParallelism(string[] args)
-    {
-        var mdopArg = args.FirstOrDefault(a =>
-            a.StartsWith("--mdop=", StringComparison.OrdinalIgnoreCase));
-
-        if (mdopArg != null &&
-            int.TryParse(mdopArg[7..], out var parsed) &&
-            parsed > 0)
-        {
-            return parsed;
-        }
-
-        return null;
-    }
-
-    private static int ReadMaxDegreeOfParallelismFromConsole()
-    {
-        var defaultValue = Environment.ProcessorCount;
-
-        while (true)
-        {
-            Console.Write($"Enter MaxDegreeOfParallelism (default {defaultValue}): ");
-            var input = Console.ReadLine();
-
-            if (string.IsNullOrWhiteSpace(input))
-                return defaultValue;
-
-            if (int.TryParse(input, out var value) && value > 0)
-                return value;
-
-            Console.WriteLine("Please enter a positive integer.");
-        }
-    }
-
+    
     private static string? TryAutoDetectTestsDll()
     {
         var start = new DirectoryInfo(AppContext.BaseDirectory);

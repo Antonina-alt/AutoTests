@@ -9,3 +9,4 @@ E:\University\Labs\6sem\MPP\AutoTests\ProjectForTest\obj\Debug\net9.0\ProjectFor
 E:\University\Labs\6sem\MPP\AutoTests\ProjectForTest\obj\Debug\net9.0\refint\ProjectForTest.dll
 E:\University\Labs\6sem\MPP\AutoTests\ProjectForTest\obj\Debug\net9.0\ProjectForTest.pdb
 E:\University\Labs\6sem\MPP\AutoTests\ProjectForTest\obj\Debug\net9.0\ref\ProjectForTest.dll
+E:\University\Labs\6sem\MPP\AutoTests\ProjectForTest\obj\Debug\net9.0\ProjectForTest.sourcelink.json

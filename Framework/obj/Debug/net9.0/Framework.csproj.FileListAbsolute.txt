@@ -20,3 +20,4 @@ E:\University\Labs\6sem\MPP\AutoTests\Framework\obj\Debug\net9.0\Framework.dll
 E:\University\Labs\6sem\MPP\AutoTests\Framework\obj\Debug\net9.0\refint\Framework.dll
 E:\University\Labs\6sem\MPP\AutoTests\Framework\obj\Debug\net9.0\Framework.pdb
 E:\University\Labs\6sem\MPP\AutoTests\Framework\obj\Debug\net9.0\ref\Framework.dll
+E:\University\Labs\6sem\MPP\AutoTests\Framework\obj\Debug\net9.0\Framework.sourcelink.json

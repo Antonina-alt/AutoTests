@@ -34,3 +34,6 @@ E:\University\Labs\6sem\MPP\AutoTests\Runner\obj\Debug\net9.0\refint\Runner.dll
 E:\University\Labs\6sem\MPP\AutoTests\Runner\obj\Debug\net9.0\Runner.pdb
 E:\University\Labs\6sem\MPP\AutoTests\Runner\obj\Debug\net9.0\Runner.genruntimeconfig.cache
 E:\University\Labs\6sem\MPP\AutoTests\Runner\obj\Debug\net9.0\ref\Runner.dll
+E:\University\Labs\6sem\MPP\AutoTests\Runner\obj\Debug\net9.0\Runner.sourcelink.json
+E:\University\Labs\6sem\MPP\AutoTests\Runner\bin\Debug\net9.0\DynamicThreadPool.dll
+E:\University\Labs\6sem\MPP\AutoTests\Runner\bin\Debug\net9.0\DynamicThreadPool.pdb

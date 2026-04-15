@@ -2,6 +2,16 @@
   "version": 3,
   "targets": {
     "net9.0": {
+      "DynamicThreadPool/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "compile": {
+          "bin/placeholder/DynamicThreadPool.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/DynamicThreadPool.dll": {}
+        }
+      },
       "Framework/1.0.0": {
         "type": "project",
         "framework": ".NETCoreApp,Version=v9.0",
@@ -15,6 +25,11 @@
     }
   },
   "libraries": {
+    "DynamicThreadPool/1.0.0": {
+      "type": "project",
+      "path": "../DynamicThreadPool/DynamicThreadPool.csproj",
+      "msbuildProject": "../DynamicThreadPool/DynamicThreadPool.csproj"
+    },
     "Framework/1.0.0": {
       "type": "project",
       "path": "../Framework/Framework.csproj",
@@ -23,6 +38,7 @@
   },
   "projectFileDependencyGroups": {
     "net9.0": [
+      "DynamicThreadPool >= 1.0.0",
       "Framework >= 1.0.0"
     ]
   },
@@ -58,6 +74,9 @@
         "net9.0": {
           "targetAlias": "net9.0",
           "projectReferences": {
+            "E:\\University\\Labs\\6sem\\MPP\\AutoTests\\DynamicThreadPool\\DynamicThreadPool.csproj": {
+              "projectPath": "E:\\University\\Labs\\6sem\\MPP\\AutoTests\\DynamicThreadPool\\DynamicThreadPool.csproj"
+            },
             "E:\\University\\Labs\\6sem\\MPP\\AutoTests\\Framework\\Framework.csproj": {
               "projectPath": "E:\\University\\Labs\\6sem\\MPP\\AutoTests\\Framework\\Framework.csproj"
             }

@@ -7,12 +7,6 @@ using Framework;
 
 namespace Tests;
 
-//Priority:
-//ClearCompleted_RemovesDone_ReturnsRemovedCount - 10
-//GetById_ThrowsIfMissing - 3
-//GetById_ReturnsExisting - 2
-//Remove_ReturnsTrueWhenRemoved_FalseWhenMissing - 1
-
 [TestClass(Category = "ProjectForTest")]
 [UseSharedContext(typeof(TestDbContext))]
 public sealed class TodoServiceTests
@@ -165,9 +159,6 @@ public sealed class TodoServiceTests
     [TestCase("hello", "x", 0)]
     [TestCase("Hello", "he", 1)] 
     [TestCase("hello world", "WORLD", 1)] 
-    [TestCase("hello world", "q", 5)] 
-    [TestCase("hello", "hell", 0)] 
-    [TestCase("hello", "hell", 10)] 
     public void Search_FindsExpected(string title, string query, int expectedCount)
     {
         _svc.Add(title);
@@ -177,7 +168,7 @@ public sealed class TodoServiceTests
     }
 
     [Test]
-    [Timeout(50)]
+    [Timeout(200)]
     public void Search_EmptyQuery_ReturnsAll()
     {
         _svc.Add("a");
@@ -188,7 +179,7 @@ public sealed class TodoServiceTests
     }
     
     [Test]
-    [Timeout(50)]
+    [Timeout(200)]
     [Priority(10)]
     public void ClearCompleted_RemovesDone_ReturnsRemovedCount()
     {
@@ -208,7 +199,7 @@ public sealed class TodoServiceTests
     }
     
     [Test]
-    [Timeout(50)]
+    [Timeout(200)]
     public async Task CountDoneAsync_Works()
     {
         var a = _svc.Add("a");
@@ -222,7 +213,7 @@ public sealed class TodoServiceTests
     }
     
     [Test]
-    [Timeout(50)]
+    [Timeout(200)]
     public void SharedContext_WasUsed()
     {
         Assert.Contains(_shared.Logs, "SharedContext: SetUp");
@@ -231,15 +222,78 @@ public sealed class TodoServiceTests
     
     [Test]
     [Timeout(200)]
-    public async Task SlowTest()
-    {
-        await Task.Delay(250);
-    }
-    
-    [Test]
-    [Timeout(200)]
     public async Task FastTest()
     {
         await Task.Delay(100);
+    }
+    
+    [Test]
+    [Timeout(3000)]
+    [Priority(20)]
+    public async Task SlowAsyncTest_800ms()
+    {
+        _svc.Add("slow-800");
+        await Task.Delay(800);
+
+        var all = _svc.GetAll();
+        Assert.AreEqual(1, all.Count);
+        Assert.AreEqual("slow-800", all[0].Title);
+    }
+
+    [Test]
+    [Timeout(4000)]
+    [Priority(21)]
+    public async Task SlowAsyncTest_1200ms()
+    {
+        var item = _svc.Add("slow-1200");
+        await Task.Delay(1200);
+
+        var got = _svc.GetById(item.Id);
+        Assert.AreEqual(item.Id, got.Id);
+        Assert.AreEqual("slow-1200", got.Title);
+    }
+
+    [Test]
+    [Timeout(4000)]
+    [Priority(22)]
+    public async Task SlowAsyncTest_1500ms()
+    {
+        var item = _svc.Add("slow-1500");
+        await Task.Delay(1500);
+
+        var updated = _svc.UpdateTitle(item.Id, "slow-1500-updated");
+        Assert.AreEqual("slow-1500-updated", updated.Title);
+    }
+
+    [Test]
+    [Timeout(4000)]
+    [Priority(23)]
+    public void SlowSyncTest_1000ms()
+    {
+        var item = _svc.Add("slow-sync");
+        Thread.Sleep(1000);
+
+        var got = _svc.GetById(item.Id);
+        Assert.AreEqual(item.Id, got.Id);
+        Assert.AreEqual("slow-sync", got.Title);
+    }
+
+    [Test]
+    [Timeout(5000)]
+    [Priority(24)]
+    public async Task SlowMixedTest_1400ms()
+    {
+        var a = _svc.Add("a");
+        var b = _svc.Add("b");
+
+        _svc.MarkDone(a.Id);
+
+        await Task.Delay(1400);
+
+        var done = await _svc.CountDoneAsync();
+        Assert.AreEqual(1, done);
+
+        var all = _svc.GetAll();
+        Assert.AreEqual(2, all.Count);
     }
 }

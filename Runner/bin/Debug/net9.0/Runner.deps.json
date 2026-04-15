@@ -8,10 +8,19 @@
     ".NETCoreApp,Version=v9.0": {
       "Runner/1.0.0": {
         "dependencies": {
+          "DynamicThreadPool": "1.0.0",
           "Framework": "1.0.0"
         },
         "runtime": {
           "Runner.dll": {}
+        }
+      },
+      "DynamicThreadPool/1.0.0": {
+        "runtime": {
+          "DynamicThreadPool.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
         }
       },
       "Framework/1.0.0": {
@@ -26,6 +35,11 @@
   },
   "libraries": {
     "Runner/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "DynamicThreadPool/1.0.0": {
       "type": "project",
       "serviceable": false,
       "sha512": ""

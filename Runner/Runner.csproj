@@ -8,6 +8,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+      <ProjectReference Include="..\DynamicThreadPool\DynamicThreadPool.csproj" />
       <ProjectReference Include="..\Framework\Framework.csproj" />
     </ItemGroup>
 

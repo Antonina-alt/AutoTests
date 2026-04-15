@@ -1,13 +1,13 @@
 ==================== SEQUENTIAL RUN ====================
 Mode: SEQUENTIAL
-MaxDegreeOfParallelism: 1
+MAX DEGREE OF PARALLELISM: 1
 TOTAL: 29, PASS: 22, FAIL: 5, SKIP: 2
-TOTAL ELAPSED: 418ms
+TOTAL ELAPSED: 447ms
 
 SKIP  TodoServiceTests.MarkDone_SetsDone_AndIsIdempotent  reason='Just test'
 SKIP  TodoServiceTests.ToggleDone_Toggles  reason='Just test'
-PASS  TodoServiceTests.ClearCompleted_RemovesDone_ReturnsRemovedCount()  7ms
-PASS  TodoServiceTests.GetById_ThrowsIfMissing()  1ms
+PASS  TodoServiceTests.ClearCompleted_RemovesDone_ReturnsRemovedCount()  9ms
+PASS  TodoServiceTests.GetById_ThrowsIfMissing()  2ms
 PASS  TodoServiceTests.GetById_ReturnsExisting()  0ms
 PASS  TodoServiceTests.Remove_ReturnsTrueWhenRemoved_FalseWhenMissing()  1ms
 PASS  TodoServiceTests.Add_TrimsTitle_AndDoneFalse()  0ms
@@ -15,13 +15,13 @@ PASS  TodoServiceTests.Add_ThrowsOnNullOrWhitespace(null)  0ms
 PASS  TodoServiceTests.Add_ThrowsOnNullOrWhitespace()  0ms
 PASS  TodoServiceTests.Add_ThrowsOnNullOrWhitespace(   )  0ms
 PASS  TodoServiceTests.GetAll_ReturnsSnapshot()  2ms
-PASS  TodoServiceTests.UpdateTitle_UpdatesAndTrims()  0ms
+PASS  TodoServiceTests.UpdateTitle_UpdatesAndTrims()  1ms
 PASS  TodoServiceTests.UpdateTitle_ThrowsOnMissing()  0ms
 PASS  TodoServiceTests.UpdateTitle_ThrowsOnInvalidTitle(null)  0ms
 PASS  TodoServiceTests.UpdateTitle_ThrowsOnInvalidTitle()  0ms
 PASS  TodoServiceTests.UpdateTitle_ThrowsOnInvalidTitle(   )  0ms
 PASS  TodoServiceTests.MarkDone_ThrowsIfMissing()  0ms
-PASS  TodoServiceTests.Search_FindsExpected(hello, he, 1)  0ms
+PASS  TodoServiceTests.Search_FindsExpected(hello, he, 1)  1ms
 PASS  TodoServiceTests.Search_FindsExpected(hello, x, 0)  0ms
 PASS  TodoServiceTests.Search_FindsExpected(Hello, he, 1)  0ms
 PASS  TodoServiceTests.Search_FindsExpected(hello world, WORLD, 1)  0ms
@@ -36,13 +36,13 @@ PASS  TodoServiceTests.FastTest()  109ms
 
 ==================== USER RUN ====================
 Mode: PARALLEL
-MaxDegreeOfParallelism: 4
+MAX DEGREE OF PARALLELISM: 2
 TOTAL: 29, PASS: 22, FAIL: 5, SKIP: 2
-TOTAL ELAPSED: 210ms
+TOTAL ELAPSED: 209ms
 
 SKIP  TodoServiceTests.MarkDone_SetsDone_AndIsIdempotent  reason='Just test'
 SKIP  TodoServiceTests.ToggleDone_Toggles  reason='Just test'
-PASS  TodoServiceTests.ClearCompleted_RemovesDone_ReturnsRemovedCount()  1ms
+PASS  TodoServiceTests.ClearCompleted_RemovesDone_ReturnsRemovedCount()  0ms
 PASS  TodoServiceTests.GetById_ThrowsIfMissing()  0ms
 PASS  TodoServiceTests.GetById_ReturnsExisting()  0ms
 PASS  TodoServiceTests.Remove_ReturnsTrueWhenRemoved_FalseWhenMissing()  0ms
@@ -67,9 +67,9 @@ FAIL  TodoServiceTests.Search_FindsExpected(hello, hell, 10)  Expected: 10, Actu
 PASS  TodoServiceTests.Search_EmptyQuery_ReturnsAll()  0ms
 PASS  TodoServiceTests.SharedContext_WasUsed()  0ms
 FAIL  TodoServiceTests.CountDoneAsync_Works()  TIMEOUT after 50ms
-PASS  TodoServiceTests.FastTest()  107ms
+PASS  TodoServiceTests.FastTest()  110ms
 FAIL  TodoServiceTests.SlowTest()  TIMEOUT after 200ms
 
 ==================== COMPARISON ====================
-Speedup: 1,99x
-Time saved: 208ms (49,8%)
+Speedup: 2,14x
+Time saved: 238ms (53,2%)
