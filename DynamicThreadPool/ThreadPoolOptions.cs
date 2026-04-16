@@ -37,5 +37,8 @@ public sealed class ThreadPoolOptions
 
         if (MonitorPeriod <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(MonitorPeriod), "MonitorPeriod must be greater than zero.");
+        
+        if (HungTaskThreshold <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(HungTaskThreshold), "HungTaskThreshold must be greater than zero.");
     }
 }
