@@ -2,6 +2,16 @@
 
 public sealed class DynamicThreadPool : IDisposable
 {
+    public event EventHandler<ThreadPoolEventArgs>? WorkerStarted;
+    public event EventHandler<ThreadPoolEventArgs>? WorkerStopped;
+    public event EventHandler<ThreadPoolEventArgs>? TaskEnqueued;
+    public event EventHandler<ThreadPoolEventArgs>? TaskStarted;
+    public event EventHandler<ThreadPoolEventArgs>? TaskCompleted;
+    public event EventHandler<ThreadPoolEventArgs>? TaskFailed;
+    public event EventHandler<ThreadPoolEventArgs>? SnapshotCreated;
+    public event EventHandler<ThreadPoolEventArgs>? HungWorkerDetected;
+    public event EventHandler<ThreadPoolEventArgs>? PoolDisposed;
+    
     private readonly ThreadPoolOptions _options;
     private readonly Queue<WorkItem> _queue = new();
     private readonly List<Thread> _workers = new();
@@ -68,6 +78,10 @@ public sealed class DynamicThreadPool : IDisposable
         }
 
         Log($"Task '{workItem.Name}' enqueued.");
+        RaiseEvent(
+            TaskEnqueued,
+            $"Task '{workItem.Name}' enqueued.",
+            taskName: workItem.Name);
 
         TryScaleUp();
     }
@@ -127,6 +141,10 @@ public sealed class DynamicThreadPool : IDisposable
             }
 
             var snapshot = GetSnapshot();
+            RaiseEvent(
+                SnapshotCreated,
+                "Thread pool snapshot created.",
+                snapshot: snapshot);
 
             Log(
                 $"Snapshot | workers={snapshot.WorkerCount} " +
@@ -180,6 +198,7 @@ public sealed class DynamicThreadPool : IDisposable
         _monitorThread?.Join();
 
         Log("Thread pool disposed.");
+        RaiseEvent(PoolDisposed, "Thread pool disposed.");
     }
 
     private void StartMinimumWorkers()
@@ -220,7 +239,13 @@ public sealed class DynamicThreadPool : IDisposable
             Log($"Worker started: {thread.Name}");
         else
             Log($"Worker started: {thread.Name} | reason: {reason}");
-
+        RaiseEvent(
+            WorkerStarted,
+            string.IsNullOrWhiteSpace(reason)
+                ? $"Worker started: {thread.Name}"
+                : $"Worker started: {thread.Name} | reason: {reason}",
+            workerName: thread.Name);
+        
         return true;
     }
 
@@ -311,18 +336,34 @@ public sealed class DynamicThreadPool : IDisposable
             try
             {
                 Log($"Worker '{Thread.CurrentThread.Name}' is executing task '{workItem.Name}'.");
+                RaiseEvent(
+                    TaskStarted,
+                    $"Task '{workItem.Name}' started.",
+                    workerName: Thread.CurrentThread.Name,
+                    taskName: workItem.Name);
 
                 workItem.Action();
 
                 Interlocked.Increment(ref _completedTasks);
 
                 Log($"Task '{workItem.Name}' completed.");
+                RaiseEvent(
+                    TaskCompleted,
+                    $"Task '{workItem.Name}' completed.",
+                    workerName: Thread.CurrentThread.Name,
+                    taskName: workItem.Name);
             }
             catch (Exception ex)
             {
                 Interlocked.Increment(ref _failedTasks);
 
                 Log($"Task '{workItem.Name}' failed: {ex.Message}");
+                RaiseEvent(
+                    TaskFailed,
+                    $"Task '{workItem.Name}' failed: {ex.Message}",
+                    workerName: Thread.CurrentThread.Name,
+                    taskName: workItem.Name,
+                    exception: ex);
             }
             finally
             {
@@ -371,7 +412,11 @@ public sealed class DynamicThreadPool : IDisposable
         Interlocked.Increment(ref _retiredWorkers);
 
         Log($"Worker stopped: {Thread.CurrentThread.Name}");
-
+        RaiseEvent(
+            WorkerStopped,
+            $"Worker stopped: {Thread.CurrentThread.Name}",
+            workerName: Thread.CurrentThread.Name);
+        
         if (!retiredByIdleTimeout && !stoppedByPoolShutdown && failedUnexpectedly)
         {
             RecoverWorkerIfNeeded();
@@ -461,6 +506,10 @@ public sealed class DynamicThreadPool : IDisposable
         {
             Interlocked.Increment(ref _hungWorkersDetected);
             Log($"Hung worker detected: {workerName}");
+            RaiseEvent(
+                HungWorkerDetected,
+                $"Hung worker detected: {workerName}",
+                workerName: workerName);
 
             StartReplacementWorkerForHungWorker();
         }
@@ -494,7 +543,13 @@ public sealed class DynamicThreadPool : IDisposable
         }
 
         thread.Start();
+
         Log($"Worker started: {thread.Name} | reason: hung worker replacement");
+        RaiseEvent(
+            WorkerStarted,
+            $"Worker started: {thread.Name} | reason: hung worker replacement",
+            workerName: thread.Name);
+
         return true;
     }
     
@@ -519,5 +574,23 @@ public sealed class DynamicThreadPool : IDisposable
         }
 
         return count;
+    }
+    
+    private void RaiseEvent(
+        EventHandler<ThreadPoolEventArgs>? handler,
+        string message,
+        string? workerName = null,
+        string? taskName = null,
+        ThreadPoolSnapshot? snapshot = null,
+        Exception? exception = null)
+    {
+        handler?.Invoke(
+            this,
+            new ThreadPoolEventArgs(
+                message,
+                workerName,
+                taskName,
+                snapshot,
+                exception));
     }
 }

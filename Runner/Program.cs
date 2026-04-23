@@ -17,7 +17,11 @@ public static class Program
         ISharedContext? SharedContext,
         object?[] Args,
         int Priority,
-        int? TimeoutMilliseconds);
+        int? TimeoutMilliseconds,
+        string? Category,
+        string? Author);
+
+    private delegate bool TestFilterDelegate(DiscoveredTest test);
 
     private sealed record ClassRuntime(Type ClassType, ISharedContext? SharedContext);
 
@@ -32,7 +36,6 @@ public static class Program
 
     private sealed record SimulationRunInfo(
         int RunNumber,
-        string BlockName,
         int MinThreads,
         int MaxThreads,
         int Passed,
@@ -57,17 +60,6 @@ public static class Program
         public int Failed;
         public int Skipped;
     }
-    
-    private sealed record BlockSummary(
-        string BlockName,
-        int MinThreads,
-        int MaxThreads,
-        int RunsCount,
-        double AverageTimeMs,
-        long MinTimeMs,
-        long MaxTimeMs,
-        double DeltaVsBaselineMs,
-        double DeltaVsBaselinePercent);
 
     public static async Task<int> Main(string[] args)
     {
@@ -95,180 +87,61 @@ public static class Program
 
     private static async Task<int> RunLoadSimulationAsync(Assembly asm)
     {
+        const int totalRuns = 50;
+        const int minThreads = 2;
+        const int maxThreads = 6;
+
         Console.WriteLine();
         Console.WriteLine("============================================================");
-        Console.WriteLine("LOAD SIMULATION AND TEST EXECUTION");
-        Console.WriteLine("Uneven load: single runs, bursts, pauses");
+        Console.WriteLine("TEST EXECUTION");
         Console.WriteLine("Total planned runs: 50");
+        Console.WriteLine("Uneven load is simulated inside each run");
         Console.WriteLine("============================================================");
         Console.WriteLine();
+
+        var testFilter = BuildTestFilterFromConsole();
 
         var runs = new List<SimulationRunInfo>();
-        var runNumber = 0;
 
-        async Task RunBlockAsync(
-            string blockName,
-            int count,
-            int minThreads,
-            int maxThreads,
-            TimeSpan delayBetweenRuns)
+        for (var runNumber = 1; runNumber <= totalRuns; runNumber++)
         {
             Console.WriteLine();
-            Console.WriteLine("------------------------------------------------------------");
-            Console.WriteLine($"BLOCK: {blockName}");
-            Console.WriteLine($"Runs: {count}");
-            Console.WriteLine($"MinThreads: {minThreads}, MaxThreads: {maxThreads}");
-            Console.WriteLine($"Delay between runs: {delayBetweenRuns.TotalMilliseconds} ms");
-            Console.WriteLine("------------------------------------------------------------");
+            Console.WriteLine($"[RUN] Starting run #{runNumber:00}");
 
-            for (int i = 0; i < count; i++)
-            {
-                runNumber++;
+            var report = await RunSuiteWithDynamicPoolAsync(asm, minThreads, maxThreads, testFilter);
+            var reportPath = SaveRunReport(report, runNumber);
 
-                Console.WriteLine();
-                Console.WriteLine($"[SIM] Starting run #{runNumber:00} ({blockName})");
+            var runInfo = new SimulationRunInfo(
+                RunNumber: runNumber,
+                MinThreads: minThreads,
+                MaxThreads: maxThreads,
+                Passed: report.Passed,
+                Failed: report.Failed,
+                Skipped: report.Skipped,
+                ElapsedMilliseconds: report.ElapsedMilliseconds,
+                ReportFilePath: reportPath);
 
-                var report = await RunSuiteWithDynamicPoolAsync(asm, minThreads, maxThreads);
-                var reportPath = SaveRunReport(report, runNumber, blockName);
+            runs.Add(runInfo);
 
-                var runInfo = new SimulationRunInfo(
-                    RunNumber: runNumber,
-                    BlockName: blockName,
-                    MinThreads: minThreads,
-                    MaxThreads: maxThreads,
-                    Passed: report.Passed,
-                    Failed: report.Failed,
-                    Skipped: report.Skipped,
-                    ElapsedMilliseconds: report.ElapsedMilliseconds,
-                    ReportFilePath: reportPath);
-
-                runs.Add(runInfo);
-
-                Console.WriteLine(
-                    $"[SIM] Run #{runInfo.RunNumber:00} finished | " +
-                    $"PASS={runInfo.Passed}, FAIL={runInfo.Failed}, SKIP={runInfo.Skipped}, " +
-                    $"TIME={runInfo.ElapsedMilliseconds}ms");
-
-                if (delayBetweenRuns > TimeSpan.Zero)
-                    await Task.Delay(delayBetweenRuns);
-            }
+            Console.WriteLine(
+                $"[RUN] Run #{runInfo.RunNumber:00} finished | " +
+                $"PASS={runInfo.Passed}, FAIL={runInfo.Failed}, SKIP={runInfo.Skipped}, " +
+                $"TIME={runInfo.ElapsedMilliseconds}ms");
         }
-
-        async Task PauseAsync(string title, TimeSpan duration)
-        {
-            Console.WriteLine();
-            Console.WriteLine($"*** {title}: {duration.TotalSeconds:0.#} sec ***");
-            await Task.Delay(duration);
-        }
-        
-        await RunBlockAsync(
-            blockName: "Baseline",
-            count: 5,
-            minThreads: 1,
-            maxThreads: 1,
-            delayBetweenRuns: TimeSpan.FromMilliseconds(300));
-
-        await PauseAsync("Idle interval", TimeSpan.FromMilliseconds(500));
-
-        await RunBlockAsync(
-            blockName: "PeakBurst",
-            count: 20,
-            minThreads: 2,
-            maxThreads: 6,
-            delayBetweenRuns: TimeSpan.FromMilliseconds(100));
-
-        await PauseAsync("Idle interval", TimeSpan.FromMilliseconds(400));
-
-        await RunBlockAsync(
-            blockName: "SparseRuns",
-            count: 5,
-            minThreads: 1,
-            maxThreads: 3,
-            delayBetweenRuns: TimeSpan.FromMilliseconds(400));
-
-        await PauseAsync("Idle interval", TimeSpan.FromMilliseconds(500));
-
-        await RunBlockAsync(
-            blockName: "ModerateLoad",
-            count: 10,
-            minThreads: 2,
-            maxThreads: 4,
-            delayBetweenRuns: TimeSpan.FromMilliseconds(150));
-
-        await PauseAsync("Idle interval", TimeSpan.FromMilliseconds(400));
-
-        await RunBlockAsync(
-            blockName: "FinalBurst",
-            count: 10,
-            minThreads: 2,
-            maxThreads: 6,
-            delayBetweenRuns: TimeSpan.FromMilliseconds(80));
 
         var summary = BuildSimulationSummary(runs);
-        var blockSummaries = BuildBlockSummaries(runs);
 
         PrintSimulationSummary(runs, summary);
-        PrintBlockComparisonTable(blockSummaries);
         SaveSimulationSummary(runs, summary);
 
         return runs.Any(r => r.Failed > 0) ? 1 : 0;
     }
 
-    private static SimulationSummary BuildSimulationSummary(IReadOnlyCollection<SimulationRunInfo> runs)
-    {
-        if (runs.Count == 0)
-        {
-            return new SimulationSummary(
-                TotalRuns: 0,
-                SuccessfulRuns: 0,
-                FailedRuns: 0,
-                AverageTimeMs: 0,
-                MinTimeMs: 0,
-                MaxTimeMs: 0);
-        }
-
-        var successfulRuns = runs.Count(r => r.Failed == 0);
-        var failedRuns = runs.Count(r => r.Failed > 0);
-
-        return new SimulationSummary(
-            TotalRuns: runs.Count,
-            SuccessfulRuns: successfulRuns,
-            FailedRuns: failedRuns,
-            AverageTimeMs: runs.Average(r => r.ElapsedMilliseconds),
-            MinTimeMs: runs.Min(r => r.ElapsedMilliseconds),
-            MaxTimeMs: runs.Max(r => r.ElapsedMilliseconds));
-    }
-
-    private static void PrintSimulationSummary(
-        IReadOnlyCollection<SimulationRunInfo> runs,
-        SimulationSummary summary)
-    {
-        Console.WriteLine();
-        Console.WriteLine("============================================================");
-        Console.WriteLine("LOAD SIMULATION SUMMARY");
-        Console.WriteLine("============================================================");
-        Console.WriteLine($"Total runs: {summary.TotalRuns}");
-        Console.WriteLine($"Successful runs: {summary.SuccessfulRuns}");
-        Console.WriteLine($"Failed runs: {summary.FailedRuns}");
-        Console.WriteLine($"Average time: {summary.AverageTimeMs:F2} ms");
-        Console.WriteLine($"Min time: {summary.MinTimeMs} ms");
-        Console.WriteLine($"Max time: {summary.MaxTimeMs} ms");
-        Console.WriteLine();
-
-        foreach (var run in runs)
-        {
-            Console.WriteLine(
-                $"Run #{run.RunNumber:00} | Block={run.BlockName} | " +
-                $"Min={run.MinThreads}, Max={run.MaxThreads} | " +
-                $"PASS={run.Passed}, FAIL={run.Failed}, SKIP={run.Skipped} | " +
-                $"TIME={run.ElapsedMilliseconds}ms");
-        }
-    }
-
     private static async Task<RunReport> RunSuiteWithDynamicPoolAsync(
         Assembly asm,
         int minThreads,
-        int maxThreads)
+        int maxThreads,
+        TestFilterDelegate testFilter)
     {
         var totalStopwatch = Stopwatch.StartNew();
         var consoleLock = new object();
@@ -325,7 +198,9 @@ public static class Program
                         Method = m,
                         Priority = m.GetCustomAttribute<PriorityAttribute>()?.Value ?? 0,
                         Ignore = m.GetCustomAttribute<IgnoreAttribute>(),
-                        TimeoutMilliseconds = m.GetCustomAttribute<TimeoutAttribute>()?.Milliseconds
+                        TimeoutMilliseconds = m.GetCustomAttribute<TimeoutAttribute>()?.Milliseconds,
+                        Category = m.GetCustomAttribute<TestAttribute>()?.Category,
+                        Author = m.GetCustomAttribute<TestAttribute>()?.Author
                     })
                     .OrderByDescending(x => x.Priority)
                     .ToArray();
@@ -339,14 +214,10 @@ public static class Program
                         continue;
                     }
 
-                    var paramCount = tm.Method.GetParameters().Length;
-                    var cases = tm.Method.GetCustomAttributes<TestCaseAttribute>().ToArray();
+                    var testAttribute = tm.Method.GetCustomAttribute<TestAttribute>();
+                    var testArguments = GetTestArguments(testClass, tm.Method);
 
-                    if (paramCount > 0 && cases.Length == 0)
-                        throw new TestDiscoveryException(
-                            $"{testClass.Name}.{tm.Method.Name} has parameters but no [TestCase] attributes.");
-
-                    if (cases.Length == 0)
+                    foreach (var args in testArguments)
                     {
                         discoveredTests.Add(new DiscoveredTest(
                             testClass,
@@ -354,27 +225,11 @@ public static class Program
                             setupMethods,
                             teardownMethods,
                             shared,
-                            Array.Empty<object?>(),
+                            args,
                             tm.Priority,
-                            tm.TimeoutMilliseconds));
-                        continue;
-                    }
-
-                    foreach (var c in cases)
-                    {
-                        if (c.Args.Length != paramCount)
-                            throw new TestDiscoveryException(
-                                $"{testClass.Name}.{tm.Method.Name}: TestCase params count {c.Args.Length} does not match parameters count {paramCount}.");
-
-                        discoveredTests.Add(new DiscoveredTest(
-                            testClass,
-                            tm.Method,
-                            setupMethods,
-                            teardownMethods,
-                            shared,
-                            c.Args,
-                            tm.Priority,
-                            tm.TimeoutMilliseconds));
+                            tm.TimeoutMilliseconds,
+                            testAttribute?.Category,
+                            testAttribute?.Author));
                     }
                 }
             }
@@ -389,8 +244,20 @@ public static class Program
                 EnableLogging = true
             });
 
+            SubscribeToThreadPoolEvents(pool);
+
+            var testsToRun = discoveredTests
+                .Where(testFilter.Invoke)
+                .ToList();
+
+            SafeWriteLine("");
+            SafeWriteLine("Test filtering result:");
+            SafeWriteLine($"  discovered tests: {discoveredTests.Count}");
+            SafeWriteLine($"  selected tests:   {testsToRun.Count}");
+            SafeWriteLine("");
+
             await EnqueueTestsWithUnevenLoadAsync(
-                discoveredTests,
+                testsToRun,
                 pool,
                 state,
                 SafeWriteLine);
@@ -428,6 +295,36 @@ public static class Program
             state.Skipped,
             totalStopwatch.ElapsedMilliseconds,
             state.Results.ToArray());
+    }
+
+    private static void SubscribeToThreadPoolEvents(DynamicThreadPool.DynamicThreadPool pool)
+    {
+        pool.WorkerStarted += (_, e) =>
+            PrintThreadPoolEvent("WorkerStarted", e);
+
+        pool.WorkerStopped += (_, e) =>
+            PrintThreadPoolEvent("WorkerStopped", e);
+
+        pool.TaskEnqueued += (_, e) =>
+            PrintThreadPoolEvent("TaskEnqueued", e);
+
+        pool.TaskStarted += (_, e) =>
+            PrintThreadPoolEvent("TaskStarted", e);
+
+        pool.TaskCompleted += (_, e) =>
+            PrintThreadPoolEvent("TaskCompleted", e);
+
+        pool.TaskFailed += (_, e) =>
+            PrintThreadPoolEvent("TaskFailed", e);
+
+        pool.SnapshotCreated += (_, e) =>
+            PrintThreadPoolEvent("SnapshotCreated", e);
+
+        pool.HungWorkerDetected += (_, e) =>
+            PrintThreadPoolEvent("HungWorkerDetected", e);
+
+        pool.PoolDisposed += (_, e) =>
+            PrintThreadPoolEvent("PoolDisposed", e);
     }
 
     private static async Task EnqueueTestsWithUnevenLoadAsync(
@@ -601,71 +498,237 @@ public static class Program
         if (capturedException != null)
             ExceptionDispatchInfo.Capture(capturedException).Throw();
     }
-    
-    private static IReadOnlyList<BlockSummary> BuildBlockSummaries(
-        IReadOnlyCollection<SimulationRunInfo> runs)
+
+    private static TestFilterDelegate BuildTestFilterFromConsole()
     {
-        var grouped = runs
-            .GroupBy(r => new { r.BlockName, r.MinThreads, r.MaxThreads })
-            .Select(g => new
-            {
-                g.Key.BlockName,
-                g.Key.MinThreads,
-                g.Key.MaxThreads,
-                RunsCount = g.Count(),
-                AverageTimeMs = g.Average(x => x.ElapsedMilliseconds),
-                MinTimeMs = g.Min(x => x.ElapsedMilliseconds),
-                MaxTimeMs = g.Max(x => x.ElapsedMilliseconds)
-            })
-            .OrderBy(x => x.BlockName)
-            .ToList();
+        Console.WriteLine("Choose test filter:");
+        Console.WriteLine("  1 - Run all tests");
+        Console.WriteLine("  2 - Filter by category");
+        Console.WriteLine("  3 - Filter by author");
+        Console.WriteLine("  4 - Filter by minimum priority");
+        Console.WriteLine("  5 - Filter by category and author");
+        Console.WriteLine("  6 - Filter by category and minimum priority");
+        Console.WriteLine("  7 - Filter by author and minimum priority");
+        Console.WriteLine("  8 - Filter by category and author and minimum priority");
 
-        var baseline = grouped.FirstOrDefault(x => x.MinThreads == 1 && x.MaxThreads == 1);
-        var baselineAverage = baseline?.AverageTimeMs ?? 0;
+        var choice = ReadMenuOption("Enter option number: ", min: 1, max: 8);
 
-        return grouped
-            .Select(x =>
-            {
-                var delta = baseline is null ? 0 : x.AverageTimeMs - baselineAverage;
-                var percent = baseline is null || baselineAverage == 0
-                    ? 0
-                    : delta / baselineAverage * 100.0;
-
-                return new BlockSummary(
-                    BlockName: x.BlockName,
-                    MinThreads: x.MinThreads,
-                    MaxThreads: x.MaxThreads,
-                    RunsCount: x.RunsCount,
-                    AverageTimeMs: x.AverageTimeMs,
-                    MinTimeMs: x.MinTimeMs,
-                    MaxTimeMs: x.MaxTimeMs,
-                    DeltaVsBaselineMs: delta,
-                    DeltaVsBaselinePercent: percent);
-            })
-            .ToList();
+        return choice switch
+        {
+            1 => BuildAllTestsFilter(),
+            2 => BuildFilterFromConsole(useCategory: true, useAuthor: false, usePriority: false),
+            3 => BuildFilterFromConsole(useCategory: false, useAuthor: true, usePriority: false),
+            4 => BuildFilterFromConsole(useCategory: false, useAuthor: false, usePriority: true),
+            5 => BuildFilterFromConsole(useCategory: true, useAuthor: true, usePriority: false),
+            6 => BuildFilterFromConsole(useCategory: true, useAuthor: false, usePriority: true),
+            7 => BuildFilterFromConsole(useCategory: false, useAuthor: true, usePriority: true),
+            8 => BuildFilterFromConsole(useCategory: true, useAuthor: true, usePriority: true),
+            _ => BuildAllTestsFilter()
+        };
     }
-    
-    private static void PrintBlockComparisonTable(IReadOnlyList<BlockSummary> summaries)
-    {
-        Console.WriteLine();
-        Console.WriteLine("============================================================");
-        Console.WriteLine("BLOCK COMPARISON TABLE");
-        Console.WriteLine("============================================================");
-        Console.WriteLine(
-            $"{"Block",-16} {"Min",4} {"Max",4} {"Runs",4} {"Avg(ms)",10} {"Min(ms)",10} {"Max(ms)",10} {"Delta(ms)",12} {"Delta(%)",10}");
 
-        foreach (var s in summaries)
+    private static int ReadMenuOption(string prompt, int min, int max)
+    {
+        while (true)
+        {
+            Console.Write(prompt);
+
+            var input = Console.ReadLine()?.Trim();
+
+            if (int.TryParse(input, out var option) && option >= min && option <= max)
+            {
+                return option;
+            }
+
+            Console.WriteLine($"Invalid option. Please enter a number from {min} to {max}.");
+        }
+    }
+
+    private static TestFilterDelegate BuildAllTestsFilter()
+    {
+        Console.WriteLine("Selected filter: all tests");
+        Console.WriteLine();
+
+        return _ => true;
+    }
+
+    private static TestFilterDelegate BuildFilterFromConsole(
+        bool useCategory,
+        bool useAuthor,
+        bool usePriority)
+    {
+        string? category = null;
+        string? author = null;
+        int? minPriority = null;
+
+        if (useCategory)
+        {
+            Console.Write("Enter category, for example Add, Search, Update: ");
+            category = Console.ReadLine()?.Trim();
+
+            if (string.IsNullOrWhiteSpace(category))
+            {
+                Console.WriteLine("Empty category. Category filter will be ignored.");
+                category = null;
+            }
+        }
+
+        if (useAuthor)
+        {
+            Console.Write("Enter author, for example Antonina: ");
+            author = Console.ReadLine()?.Trim();
+
+            if (string.IsNullOrWhiteSpace(author))
+            {
+                Console.WriteLine("Empty author. Author filter will be ignored.");
+                author = null;
+            }
+        }
+
+        if (usePriority)
+        {
+            Console.Write("Enter minimum priority, for example 5: ");
+            var priorityInput = Console.ReadLine()?.Trim();
+
+            if (int.TryParse(priorityInput, out var parsedPriority))
+            {
+                minPriority = parsedPriority;
+            }
+            else
+            {
+                Console.WriteLine("Invalid priority. Priority filter will be ignored.");
+            }
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Selected filter:");
+        Console.WriteLine($"  category:     {category ?? "-"}");
+        Console.WriteLine($"  author:       {author ?? "-"}");
+        Console.WriteLine($"  min priority: {(minPriority.HasValue ? minPriority.Value.ToString() : "-")}");
+        Console.WriteLine();
+
+        return test =>
+        {
+            if (category != null &&
+                !string.Equals(test.Category, category, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (author != null &&
+                !string.Equals(test.Author, author, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (minPriority.HasValue && test.Priority < minPriority.Value)
+            {
+                return false;
+            }
+
+            return true;
+        };
+    }
+
+    private static IReadOnlyList<object?[]> GetTestArguments(Type testClass, MethodInfo method)
+    {
+        var paramCount = method.GetParameters().Length;
+        var result = new List<object?[]>();
+
+        var testCases = method.GetCustomAttributes<TestCaseAttribute>().ToArray();
+
+        foreach (var testCase in testCases)
+        {
+            ValidateArgumentsCount(testClass, method, testCase.Args, paramCount);
+            result.Add(testCase.Args);
+        }
+
+        var sources = method.GetCustomAttributes<TestCaseSourceAttribute>().ToArray();
+
+        foreach (var source in sources)
+        {
+            var sourceMethod = testClass.GetMethod(
+                source.SourceName,
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+
+            if (sourceMethod == null)
+                throw new TestDiscoveryException(
+                    $"{testClass.Name}.{method.Name}: test case source method '{source.SourceName}' was not found.");
+
+            var sourceValue = sourceMethod.Invoke(null, Array.Empty<object?>());
+
+            if (sourceValue is not System.Collections.IEnumerable enumerable)
+                throw new TestDiscoveryException(
+                    $"{testClass.Name}.{method.Name}: test case source '{source.SourceName}' must return IEnumerable.");
+
+            foreach (var item in enumerable)
+            {
+                var args = ConvertSourceItemToArguments(testClass, method, item, paramCount);
+
+                ValidateArgumentsCount(testClass, method, args, paramCount);
+                result.Add(args);
+            }
+        }
+
+        if (paramCount > 0 && result.Count == 0)
+            throw new TestDiscoveryException(
+                $"{testClass.Name}.{method.Name} has parameters but no [TestCase] or [TestCaseSource] attributes.");
+
+        if (paramCount == 0 && result.Count == 0)
+            result.Add(Array.Empty<object?>());
+
+        return result;
+    }
+
+    private static object?[] ConvertSourceItemToArguments(
+        Type testClass,
+        MethodInfo method,
+        object? item,
+        int paramCount)
+    {
+        if (item is object?[] args)
+            return args;
+
+        if (paramCount == 1)
+            return new[] { item };
+
+        throw new TestDiscoveryException(
+            $"{testClass.Name}.{method.Name}: each item from [TestCaseSource] must be object?[] for tests with multiple parameters.");
+    }
+
+    private static void ValidateArgumentsCount(
+        Type testClass,
+        MethodInfo method,
+        object?[] args,
+        int expectedCount)
+    {
+        if (args.Length != expectedCount)
+            throw new TestDiscoveryException(
+                $"{testClass.Name}.{method.Name}: arguments count {args.Length} does not match parameters count {expectedCount}.");
+    }
+
+    private static void PrintThreadPoolEvent(string eventName, ThreadPoolEventArgs e)
+    {
+        Console.WriteLine(
+            $"[EVENT] {eventName} | " +
+            $"time={e.TimestampUtc:HH:mm:ss.fff} | " +
+            $"worker={e.WorkerName ?? "-"} | " +
+            $"task={e.TaskName ?? "-"} | " +
+            $"message={e.Message}");
+
+        if (e.Snapshot != null)
         {
             Console.WriteLine(
-                $"{s.BlockName,-16} " +
-                $"{s.MinThreads,4} " +
-                $"{s.MaxThreads,4} " +
-                $"{s.RunsCount,4} " +
-                $"{s.AverageTimeMs,10:F2} " +
-                $"{s.MinTimeMs,10} " +
-                $"{s.MaxTimeMs,10} " +
-                $"{s.DeltaVsBaselineMs,12:F2} " +
-                $"{s.DeltaVsBaselinePercent,10:F2}");
+                $"        snapshot: workers={e.Snapshot.WorkerCount}, " +
+                $"queue={e.Snapshot.QueueLength}, " +
+                $"completed={e.Snapshot.CompletedTasks}, " +
+                $"failed={e.Snapshot.FailedTasks}, " +
+                $"hung={e.Snapshot.HungWorkersDetected}");
+        }
+
+        if (e.Exception != null)
+        {
+            Console.WriteLine($"        exception: {e.Exception.GetType().Name}: {e.Exception.Message}");
         }
     }
 
@@ -675,7 +738,7 @@ public static class Program
     {
         var lines = new List<string>
         {
-            "LOAD SIMULATION SUMMARY",
+            "TEST EXECUTION SUMMARY",
             $"DATE: {DateTime.Now:yyyy-MM-dd HH:mm:ss}",
             $"TOTAL RUNS: {summary.TotalRuns}",
             $"SUCCESSFUL RUNS: {summary.SuccessfulRuns}",
@@ -686,46 +749,24 @@ public static class Program
             "",
             "DETAILS:"
         };
-        
-        lines.Add("");
-        lines.Add("BLOCK COMPARISON TABLE:");
-
-        var blockSummaries = BuildBlockSummaries(runs);
-
-        lines.Add(
-            $"{"Block",-16} {"Min",4} {"Max",4} {"Runs",4} {"Avg(ms)",10} {"Min(ms)",10} {"Max(ms)",10} {"DeltaVsBaseline",16} {"DeltaPercent",14}");
-
-        foreach (var s in blockSummaries)
-        {
-            lines.Add(
-                $"{s.BlockName,-16} " +
-                $"{s.MinThreads,4} " +
-                $"{s.MaxThreads,4} " +
-                $"{s.RunsCount,4} " +
-                $"{s.AverageTimeMs,10:F2} " +
-                $"{s.MinTimeMs,10} " +
-                $"{s.MaxTimeMs,10} " +
-                $"{s.DeltaVsBaselineMs,16:F2} " +
-                $"{s.DeltaVsBaselinePercent,14:F2}");
-        }
 
         foreach (var run in runs)
         {
             lines.Add(
-                $"Run #{run.RunNumber:00} | Block={run.BlockName} | " +
+                $"Run #{run.RunNumber:00} | " +
                 $"Min={run.MinThreads}, Max={run.MaxThreads} | " +
                 $"PASS={run.Passed}, FAIL={run.Failed}, SKIP={run.Skipped} | " +
                 $"TIME={run.ElapsedMilliseconds}ms | REPORT={run.ReportFilePath}");
         }
 
-        var filePath = Path.Combine(AppContext.BaseDirectory, "load-simulation-summary.txt");
+        var filePath = Path.Combine(AppContext.BaseDirectory, "test-execution-summary.txt");
         File.WriteAllLines(filePath, lines);
 
         Console.WriteLine();
-        Console.WriteLine($"Simulation summary saved to: {filePath}");
+        Console.WriteLine($"Execution summary saved to: {filePath}");
     }
-    
-    private static string SaveRunReport(RunReport report, int? runNumber, string? blockName)
+
+    private static string SaveRunReport(RunReport report, int? runNumber)
     {
         var lines = new List<string>
         {
@@ -742,21 +783,12 @@ public static class Program
 
         lines.AddRange(report.Results);
 
-        string filePath;
+        var reportsDir = Path.Combine(AppContext.BaseDirectory, "run-reports");
+        Directory.CreateDirectory(reportsDir);
 
-        if (runNumber.HasValue && !string.IsNullOrWhiteSpace(blockName))
-        {
-            var reportsDir = Path.Combine(AppContext.BaseDirectory, "simulation-reports");
-            Directory.CreateDirectory(reportsDir);
-
-            filePath = Path.Combine(
-                reportsDir,
-                $"run_{runNumber.Value:00}_{blockName}.txt");
-        }
-        else
-        {
-            filePath = Path.Combine(AppContext.BaseDirectory, "run-report.txt");
-        }
+        var filePath = Path.Combine(
+            reportsDir,
+            $"run_{runNumber:00}.txt");
 
         File.WriteAllLines(filePath, lines);
         return filePath;
@@ -784,6 +816,57 @@ public static class Program
         {
             foreach (var tearDown in test.TearDowns)
                 await InvokeMaybeAsync(instance, tearDown);
+        }
+    }
+
+    private static SimulationSummary BuildSimulationSummary(IReadOnlyCollection<SimulationRunInfo> runs)
+    {
+        if (runs.Count == 0)
+        {
+            return new SimulationSummary(
+                TotalRuns: 0,
+                SuccessfulRuns: 0,
+                FailedRuns: 0,
+                AverageTimeMs: 0,
+                MinTimeMs: 0,
+                MaxTimeMs: 0);
+        }
+
+        var successfulRuns = runs.Count(r => r.Failed == 0);
+        var failedRuns = runs.Count(r => r.Failed > 0);
+
+        return new SimulationSummary(
+            TotalRuns: runs.Count,
+            SuccessfulRuns: successfulRuns,
+            FailedRuns: failedRuns,
+            AverageTimeMs: runs.Average(r => r.ElapsedMilliseconds),
+            MinTimeMs: runs.Min(r => r.ElapsedMilliseconds),
+            MaxTimeMs: runs.Max(r => r.ElapsedMilliseconds));
+    }
+
+    private static void PrintSimulationSummary(
+        IReadOnlyCollection<SimulationRunInfo> runs,
+        SimulationSummary summary)
+    {
+        Console.WriteLine();
+        Console.WriteLine("============================================================");
+        Console.WriteLine("LOAD SIMULATION SUMMARY");
+        Console.WriteLine("============================================================");
+        Console.WriteLine($"Total runs: {summary.TotalRuns}");
+        Console.WriteLine($"Successful runs: {summary.SuccessfulRuns}");
+        Console.WriteLine($"Failed runs: {summary.FailedRuns}");
+        Console.WriteLine($"Average time: {summary.AverageTimeMs:F2} ms");
+        Console.WriteLine($"Min time: {summary.MinTimeMs} ms");
+        Console.WriteLine($"Max time: {summary.MaxTimeMs} ms");
+        Console.WriteLine();
+
+        foreach (var run in runs)
+        {
+            Console.WriteLine(
+                $"Run #{run.RunNumber:00} | " +
+                $"Min={run.MinThreads}, Max={run.MaxThreads} | " +
+                $"PASS={run.Passed}, FAIL={run.Failed}, SKIP={run.Skipped} | " +
+                $"TIME={run.ElapsedMilliseconds}ms");
         }
     }
 
@@ -817,7 +900,7 @@ public static class Program
         var positional = args.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal));
         return positional ?? TryAutoDetectTestsDll();
     }
-    
+
     private static string? TryAutoDetectTestsDll()
     {
         var start = new DirectoryInfo(AppContext.BaseDirectory);

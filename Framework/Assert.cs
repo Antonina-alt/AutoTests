@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
+using System.Text;
 
 namespace Framework;
 
@@ -14,6 +16,36 @@ public static class Assert
     public static void IsFalse(bool condition, string? message = null)
     {
         if (condition) throw new AssertionFailedException(message ?? "Expected condition to be false.");
+    }
+
+    public static void That(Expression<Func<bool>> expression, string? message = null)
+    {
+        if (expression is null)
+            throw new ArgumentNullException(nameof(expression));
+
+        bool result;
+
+        try
+        {
+            result = expression.Compile().Invoke();
+        }
+        catch (Exception ex)
+        {
+            throw new AssertionFailedException(
+                message ?? $"Expression threw an exception: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        if (result)
+            return;
+
+        var details = new StringBuilder();
+
+        details.AppendLine(message ?? "Expression assertion failed.");
+        details.AppendLine($"Expression: {expression.Body}");
+        details.AppendLine("Expression tree details:");
+        AppendExpressionDetails(expression.Body, details, indent: 0);
+
+        throw new AssertionFailedException(details.ToString());
     }
 
     public static void AreEqual<T>(T expected, T actual, string? message = null)
@@ -37,7 +69,7 @@ public static class Assert
     {
         if (value is null) throw new AssertionFailedException(message ?? "Expected not null.");
     }
-    
+
     public static void IsEmpty(string? value, string? message = null)
     {
         if (!string.IsNullOrEmpty(value))
@@ -49,7 +81,7 @@ public static class Assert
         if (string.IsNullOrEmpty(value))
             throw new AssertionFailedException(message ?? "Expected string to be not empty.");
     }
-    
+
     public static void IsEmpty<T>(IEnumerable<T> items, string? message = null)
     {
         if (items is null) throw new AssertionFailedException(message ?? "Expected collection, got null.");
@@ -113,12 +145,14 @@ public static class Assert
         }
         catch (Exception ex)
         {
-            throw new AssertionFailedException(message ?? $"Expected {typeof(TException).Name}, but got {ex.GetType().Name}.");
+            throw new AssertionFailedException(message ??
+                                               $"Expected {typeof(TException).Name}, but got {ex.GetType().Name}.");
         }
 
-        throw new AssertionFailedException(message ?? $"Expected exception {typeof(TException).Name}, but no exception was thrown.");
+        throw new AssertionFailedException(message ??
+                                           $"Expected exception {typeof(TException).Name}, but no exception was thrown.");
     }
-    
+
     public static async Task ThrowsAsync<TException>(Func<Task> action, string? message = null)
         where TException : Exception
     {
@@ -132,9 +166,117 @@ public static class Assert
         }
         catch (Exception ex)
         {
-            throw new AssertionFailedException(message ?? $"Expected {typeof(TException).Name}, but got {ex.GetType().Name}.");
+            throw new AssertionFailedException(message ??
+                                               $"Expected {typeof(TException).Name}, but got {ex.GetType().Name}.");
         }
 
-        throw new AssertionFailedException(message ?? $"Expected exception {typeof(TException).Name}, but no exception was thrown.");
+        throw new AssertionFailedException(message ??
+                                           $"Expected exception {typeof(TException).Name}, but no exception was thrown.");
+    }
+
+    private static void AppendExpressionDetails(Expression expression, StringBuilder builder, int indent)
+    {
+        var padding = new string(' ', indent * 2);
+
+        switch (expression)
+        {
+            case BinaryExpression binary:
+                builder.AppendLine($"{padding}Binary expression:");
+                builder.AppendLine($"{padding}  Operator: {binary.NodeType}");
+                builder.AppendLine($"{padding}  Left:");
+                AppendExpressionDetails(binary.Left, builder, indent + 2);
+                builder.AppendLine($"{padding}  Right:");
+                AppendExpressionDetails(binary.Right, builder, indent + 2);
+
+                TryAppendBinaryValues(binary, builder, padding);
+                break;
+
+            case MemberExpression member:
+                builder.AppendLine($"{padding}Member expression:");
+                builder.AppendLine($"{padding}  Member: {member.Member.Name}");
+                builder.AppendLine($"{padding}  Value: {FormatValue(EvaluateExpression(member))}");
+                break;
+
+            case ConstantExpression constant:
+                builder.AppendLine($"{padding}Constant expression:");
+                builder.AppendLine($"{padding}  Value: {FormatValue(constant.Value)}");
+                break;
+
+            case MethodCallExpression methodCall:
+                builder.AppendLine($"{padding}Method call expression:");
+                builder.AppendLine($"{padding}  Method: {methodCall.Method.Name}");
+                builder.AppendLine($"{padding}  Value: {FormatValue(EvaluateExpression(methodCall))}");
+
+                if (methodCall.Object != null)
+                {
+                    builder.AppendLine($"{padding}  Object:");
+                    AppendExpressionDetails(methodCall.Object, builder, indent + 2);
+                }
+
+                if (methodCall.Arguments.Count > 0)
+                {
+                    builder.AppendLine($"{padding}  Arguments:");
+
+                    foreach (var argument in methodCall.Arguments)
+                        AppendExpressionDetails(argument, builder, indent + 2);
+                }
+
+                break;
+
+            case UnaryExpression unary:
+                builder.AppendLine($"{padding}Unary expression:");
+                builder.AppendLine($"{padding}  Operator: {unary.NodeType}");
+                builder.AppendLine($"{padding}  Operand:");
+                AppendExpressionDetails(unary.Operand, builder, indent + 2);
+                builder.AppendLine($"{padding}  Value: {FormatValue(EvaluateExpression(unary))}");
+                break;
+
+            default:
+                builder.AppendLine($"{padding}{expression.NodeType} expression:");
+                builder.AppendLine($"{padding}  Expression: {expression}");
+                builder.AppendLine($"{padding}  Value: {FormatValue(EvaluateExpression(expression))}");
+                break;
+        }
+    }
+    
+    private static void TryAppendBinaryValues(BinaryExpression binary, StringBuilder builder, string padding)
+    {
+        try
+        {
+            var leftValue = EvaluateExpression(binary.Left);
+            var rightValue = EvaluateExpression(binary.Right);
+            var resultValue = EvaluateExpression(binary);
+
+            builder.AppendLine($"{padding}  Values:");
+            builder.AppendLine($"{padding}    Left value: {FormatValue(leftValue)}");
+            builder.AppendLine($"{padding}    Right value: {FormatValue(rightValue)}");
+            builder.AppendLine($"{padding}    Result: {FormatValue(resultValue)}");
+        }
+        catch (Exception ex)
+        {
+            builder.AppendLine($"{padding}  Values: cannot evaluate expression part: {ex.Message}");
+        }
+    }
+    
+    private static object? EvaluateExpression(Expression expression)
+    {
+        if (expression is ConstantExpression constant)
+            return constant.Value;
+
+        var converted = Expression.Convert(expression, typeof(object));
+        var lambda = Expression.Lambda<Func<object?>>(converted);
+
+        return lambda.Compile().Invoke();
+    }
+    
+    private static string FormatValue(object? value)
+    {
+        return value switch
+        {
+            null => "null",
+            string text => $"\"{text}\"",
+            char ch => $"'{ch}'",
+            _ => value.ToString() ?? string.Empty
+        };
     }
 }

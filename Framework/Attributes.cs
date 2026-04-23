@@ -11,7 +11,9 @@ public sealed class TestClassAttribute : Attribute
 [AttributeUsage(AttributeTargets.Method, Inherited = false)]
 public sealed class TestAttribute : Attribute
 {
-    public string? Description { get; init; }
+    public string? Category { get; set; }
+
+    public string? Author { get; set; }
 }
 
 [AttributeUsage(AttributeTargets.Method, AllowMultiple = true, Inherited = false)]
@@ -60,5 +62,19 @@ public sealed class TimeoutAttribute : Attribute
             throw new ArgumentOutOfRangeException(nameof(milliseconds), "Timeout must be greater than 0.");
 
         Milliseconds = milliseconds;
+    }
+}
+
+[AttributeUsage(AttributeTargets.Method, AllowMultiple = true, Inherited = false)]
+public sealed class TestCaseSourceAttribute : Attribute
+{
+    public string SourceName { get; }
+
+    public TestCaseSourceAttribute(string sourceName)
+    {
+        if (string.IsNullOrWhiteSpace(sourceName))
+            throw new ArgumentException("Source name cannot be empty.", nameof(sourceName));
+
+        SourceName = sourceName;
     }
 }

@@ -39,7 +39,7 @@ public sealed class TodoServiceTests
         Assert.IsFalse(item.Done);
     }
 
-    [Test]
+    [Test(Category = "Add", Author = "Antonia")]
     [Timeout(50)]
     [TestCase(null)]
     [TestCase("")]
@@ -47,21 +47,20 @@ public sealed class TodoServiceTests
     public void Add_ThrowsOnNullOrWhitespace(string? title)
     {
         Assert.Throws<ArgumentException>(() => _svc.Add(title!));
-
     }
-    
-    [Test]
+
+    [Test(Category = "Remove", Author = "Antonia")]
     [Timeout(50)]
     [Priority(1)]
     public void Remove_ReturnsTrueWhenRemoved_FalseWhenMissing()
     {
         var item = _svc.Add("a");
         Assert.IsTrue(_svc.Remove(item.Id));
-        Assert.IsFalse(_svc.Remove(item.Id)); 
-        Assert.IsFalse(_svc.Remove(Guid.NewGuid())); 
+        Assert.IsFalse(_svc.Remove(item.Id));
+        Assert.IsFalse(_svc.Remove(Guid.NewGuid()));
     }
-    
-    [Test]
+
+    [Test(Category = "Id", Author = "Antonia")]
     [Timeout(50)]
     [Priority(2)]
     public void GetById_ReturnsExisting()
@@ -72,14 +71,14 @@ public sealed class TodoServiceTests
         Assert.AreEqual("a", got.Title);
     }
 
-    [Test]
+    [Test(Category = "Id", Author = "Antonia")]
     [Timeout(50)]
     [Priority(3)]
     public void GetById_ThrowsIfMissing()
     {
         Assert.Throws<InvalidOperationException>(() => _svc.GetById(Guid.NewGuid()));
     }
-    
+
     [Test]
     [Timeout(50)]
     public void GetAll_ReturnsSnapshot()
@@ -91,8 +90,8 @@ public sealed class TodoServiceTests
         Assert.AreEqual(2, all.Count);
         Assert.SequenceEqual(all.Select(x => x.Title).OrderBy(x => x), new[] { "a", "b" });
     }
-    
-    [Test]
+
+    [Test(Category = "Update", Author = "Tonya")]
     [Timeout(50)]
     public void UpdateTitle_UpdatesAndTrims()
     {
@@ -102,14 +101,14 @@ public sealed class TodoServiceTests
         Assert.AreEqual("new", updated.Title);
     }
 
-    [Test]
+    [Test(Category = "Update", Author = "Antonia")]
     [Timeout(50)]
     public void UpdateTitle_ThrowsOnMissing()
     {
         Assert.Throws<InvalidOperationException>(() => _svc.UpdateTitle(Guid.NewGuid(), "x"));
     }
 
-    [Test]
+    [Test(Category = "Update", Author = "Tonya")]
     [Timeout(50)]
     [TestCase(null)]
     [TestCase("")]
@@ -119,7 +118,7 @@ public sealed class TodoServiceTests
         var item = _svc.Add("a");
         Assert.Throws<ArgumentException>(() => _svc.UpdateTitle(item.Id, newTitle!));
     }
-    
+
     [Test]
     [Ignore("Just test")]
     public void MarkDone_SetsDone_AndIsIdempotent()
@@ -133,13 +132,13 @@ public sealed class TodoServiceTests
         Assert.IsTrue(d2.Done);
     }
 
-    [Test]
+    [Test(Category = "Mark", Author = "Tonya")]
     [Timeout(50)]
     public void MarkDone_ThrowsIfMissing()
     {
         Assert.Throws<InvalidOperationException>(() => _svc.MarkDone(Guid.NewGuid()));
     }
-    
+
     [Test]
     [Ignore("Just test")]
     public void ToggleDone_Toggles()
@@ -152,13 +151,13 @@ public sealed class TodoServiceTests
         var t2 = _svc.ToggleDone(item.Id);
         Assert.IsFalse(t2.Done);
     }
-    
-    [Test]
+
+    [Test(Category = "Search", Author = "Tonya")]
     [Timeout(50)]
     [TestCase("hello", "he", 1)]
     [TestCase("hello", "x", 0)]
-    [TestCase("Hello", "he", 1)] 
-    [TestCase("hello world", "WORLD", 1)] 
+    [TestCase("Hello", "he", 1)]
+    [TestCase("hello world", "WORLD", 1)]
     public void Search_FindsExpected(string title, string query, int expectedCount)
     {
         _svc.Add(title);
@@ -167,7 +166,7 @@ public sealed class TodoServiceTests
         Assert.AreEqual(expectedCount, found.Count);
     }
 
-    [Test]
+    [Test(Category = "Search", Author = "Tonya")]
     [Timeout(200)]
     public void Search_EmptyQuery_ReturnsAll()
     {
@@ -177,8 +176,8 @@ public sealed class TodoServiceTests
         var all = _svc.Search("   ");
         Assert.AreEqual(2, all.Count);
     }
-    
-    [Test]
+
+    [Test(Category = "Remove", Author = "Antonia")]
     [Timeout(200)]
     [Priority(10)]
     public void ClearCompleted_RemovesDone_ReturnsRemovedCount()
@@ -197,8 +196,8 @@ public sealed class TodoServiceTests
         Assert.AreEqual(1, all.Count);
         Assert.AreEqual(b.Id, all[0].Id);
     }
-    
-    [Test]
+
+    [Test(Category = "Assert", Author = "Antonina")]
     [Timeout(200)]
     public async Task CountDoneAsync_Works()
     {
@@ -210,24 +209,35 @@ public sealed class TodoServiceTests
         Assert.AreEqual(1, done);
         Assert.Greater(done, 0);
         Assert.InRange(done, 0, 2);
+        
+        Assert.That(() => done == 1 && done >= 0 && done <= 2);
     }
     
-    [Test]
+    [Test(Category = "Assert", Author = "Antonina")]
+    public void AssertThat_ShowsExpressionTreeDetails_WhenExpressionFails()
+    {
+        var done = 1;
+        var total = 3;
+
+        Assert.That(() => done == 2 && total < 2);
+    }
+
+    [Test(Category = "SharedContext", Author = "Antonina")]
     [Timeout(200)]
     public void SharedContext_WasUsed()
     {
         Assert.Contains(_shared.Logs, "SharedContext: SetUp");
         Assert.DoesNotContain(_shared.Logs, "some missing log");
     }
-    
-    [Test]
+
+    [Test(Category = "Time", Author = "Antonina")]
     [Timeout(200)]
     public async Task FastTest()
     {
         await Task.Delay(100);
     }
     
-    [Test]
+    [Test(Category = "Time", Author = "Antonina")]
     [Timeout(3000)]
     [Priority(20)]
     public async Task SlowAsyncTest_800ms()
@@ -240,7 +250,7 @@ public sealed class TodoServiceTests
         Assert.AreEqual("slow-800", all[0].Title);
     }
 
-    [Test]
+    [Test(Category = "Time", Author = "Antonina")]
     [Timeout(4000)]
     [Priority(21)]
     public async Task SlowAsyncTest_1200ms()
@@ -253,7 +263,7 @@ public sealed class TodoServiceTests
         Assert.AreEqual("slow-1200", got.Title);
     }
 
-    [Test]
+    [Test(Category = "Time", Author = "Antonina")]
     [Timeout(4000)]
     [Priority(22)]
     public async Task SlowAsyncTest_1500ms()
@@ -265,7 +275,7 @@ public sealed class TodoServiceTests
         Assert.AreEqual("slow-1500-updated", updated.Title);
     }
 
-    [Test]
+    [Test(Category = "Time", Author = "Antonina")]
     [Timeout(4000)]
     [Priority(23)]
     public void SlowSyncTest_1000ms()
@@ -278,7 +288,7 @@ public sealed class TodoServiceTests
         Assert.AreEqual("slow-sync", got.Title);
     }
 
-    [Test]
+    [Test(Category = "Time", Author = "Antonina")]
     [Timeout(5000)]
     [Priority(24)]
     public async Task SlowMixedTest_1400ms()
@@ -295,5 +305,95 @@ public sealed class TodoServiceTests
 
         var all = _svc.GetAll();
         Assert.AreEqual(2, all.Count);
+    }
+
+    [Test(Category = "Add", Author = "Antonina")]
+    [Timeout(100)]
+    [Priority(5)]
+    [TestCaseSource(nameof(Add_ValidTitleCases))]
+    public void Add_WithSource_TrimsTitle_AndCreatesNotDoneItem(string title, string expectedTitle)
+    {
+        var item = _svc.Add(title);
+
+        Assert.AreEqual(expectedTitle, item.Title);
+        Assert.IsFalse(item.Done);
+    }
+
+    private static IEnumerable<object?[]> Add_ValidTitleCases()
+    {
+        yield return new object?[] { "task", "task" };
+        yield return new object?[] { "  task with spaces  ", "task with spaces" };
+        yield return new object?[] { "UPPER", "UPPER" };
+    }
+
+    [Test(Category = "Search", Author = "Antonina")]
+    [Timeout(100)]
+    [Priority(6)]
+    [TestCaseSource(nameof(Search_SourceCases))]
+    public void Search_WithSource_FindsExpectedItems(
+        string[] titles,
+        string query,
+        int expectedCount)
+    {
+        foreach (var title in titles)
+            _svc.Add(title);
+
+        var found = _svc.Search(query);
+
+        Assert.AreEqual(expectedCount, found.Count);
+    }
+
+    private static IEnumerable<object?[]> Search_SourceCases()
+    {
+        yield return new object?[]
+        {
+            new[] { "Buy milk", "Read book", "Call mom" },
+            "milk",
+            1
+        };
+
+        yield return new object?[]
+        {
+            new[] { "Buy milk", "Milk chocolate", "Read book" },
+            "MILK",
+            2
+        };
+
+        yield return new object?[]
+        {
+            new[] { "Buy milk", "Read book", "Call mom" },
+            "unknown",
+            0
+        };
+
+        yield return new object?[]
+        {
+            new[] { "Buy milk", "Read book", "Call mom" },
+            "   ",
+            3
+        };
+    }
+
+    [Test(Category = "Update", Author = "Antonia")]
+    [Timeout(100)]
+    [Priority(7)]
+    [TestCaseSource(nameof(UpdateTitle_SourceCases))]
+    public void UpdateTitle_WithSource_UpdatesAndTrims(
+        string originalTitle,
+        string newTitle,
+        string expectedTitle)
+    {
+        var item = _svc.Add(originalTitle);
+
+        var updated = _svc.UpdateTitle(item.Id, newTitle);
+
+        Assert.AreEqual(expectedTitle, updated.Title);
+    }
+
+    private static IEnumerable<object?[]> UpdateTitle_SourceCases()
+    {
+        yield return new object?[] { "old", "new", "new" };
+        yield return new object?[] { "old", "  new with spaces  ", "new with spaces" };
+        yield return new object?[] { "first", "SECOND", "SECOND" };
     }
 }
